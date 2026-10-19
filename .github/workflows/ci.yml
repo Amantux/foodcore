@@ -1,0 +1,92 @@
+# foodcore is consumed by two apps that pin it by commit SHA, so a green main
+# is the only signal either of them has before bumping. The install job matters
+# more than the test job: this package has twice shipped a wheel that imported
+# cleanly while MISSING something — a subpackage once, and the reference dataset
+# is package DATA that a pyproject edit can silently drop. Both failures look
+# identical at runtime ("the feature quietly does nothing") and NEITHER is
+# visible from a source checkout, where the files are simply there on disk.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded PR runs, never a push run: a cancelled main run would leave
+# consumers unable to tell whether the SHA they are about to pin is sound.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor both consumers run; 3.12 catches what is coming.
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install pytest ruff
+      - run: ruff check .
+      - run: python -m pytest -q
+
+  installed-artifact:
+    # The acceptance test for "standalone". Everything here is about the WHEEL,
+    # not the checkout.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install into a venv with no frameworks present
+        run: |
+          python -m venv /tmp/v
+          /tmp/v/bin/pip install --quiet .
+
+      - name: Assert zero runtime dependencies
+        run: |
+          # Anything beyond pip/setuptools/wheel means a dependency crept in.
+          /tmp/v/bin/pip list --format=freeze \
+            | grep -ivE '^(pip|setuptools|wheel|foodcore)==' \
+            | tee /tmp/extra
+          test ! -s /tmp/extra
+
+      - name: Assert the artifact, not just the import
+        run: |
+          cd /tmp   # NOT the checkout, or the source tree answers for the wheel
+          /tmp/v/bin/python - <<'PY'
+          import gzip, importlib.util as u, os
+          for mod in ("flask", "sqlalchemy", "alembic", "psycopg", "requests"):
+              assert u.find_spec(mod) is None, f"{mod} leaked into the venv"
+
+          import foodcore
+          from foodcore import convert, nutrition, allergens, dietary  # noqa: F401
+          from foodcore.rules.rulesets import allergen_ruleset
+
+          data = os.path.join(os.path.dirname(foodcore.__file__), "data")
+          asset = os.path.join(data, "usda-sr-legacy-2018-04.sqlite.gz")
+          assert os.path.isfile(asset), "the shipped dataset is missing from the wheel"
+          assert len(gzip.open(asset, "rb").read(64)) == 64, "dataset is not readable gzip"
+          allergen_ruleset()   # the rules subpackage shipped too
+
+          ds = foodcore.load_dataset()
+          out = convert.convert_text("2 lb flour", "g", dataset=ds)
+          assert getattr(out, "resolved", False), out
+          print("foodcore", foodcore.__version__, "ok from the installed wheel")
+          PY
+
+      - name: Run the suite against the INSTALLED package
+        run: |
+          /tmp/v/bin/pip install --quiet pytest
+          /tmp/v/bin/python -m pytest -q
