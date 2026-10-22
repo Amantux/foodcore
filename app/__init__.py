@@ -74,6 +74,9 @@ __version__ = "0.1.0"
 #: changes, and then record what changed in the README's history section.
 RULE_EPOCH = 1
 
+#: The DV engine rule version. Bumped when the FDA DV table changes.
+DV_RULE_VERSION = "dv/1"
+
 #: Dataset files declare the schema they were built with; a Dataset refuses to
 #: open one built for a different schema rather than mis-reading it.
 #: 2 — portion rows carry size/qualifier/amount, so "cup, chopped" and
@@ -96,10 +99,10 @@ def rule_version(kind: str) -> str:
 # The engines live in sibling modules. They are exposed lazily (PEP 562) so
 # that ``import foodcore`` works before they all exist, and so a host app that
 # only needs conversions does not pay for the rest.
-_ENGINES = ("convert", "nutrition", "allergens", "dietary")
+_ENGINES = ("convert", "nutrition", "allergens", "dietary", "dv")
 
 if TYPE_CHECKING:  # pragma: no cover - for type checkers only
-    from . import allergens, convert, dietary, nutrition  # noqa: F401
+    from . import allergens, convert, dietary, dv, nutrition  # noqa: F401
 
 
 def __getattr__(name: str) -> Any:
