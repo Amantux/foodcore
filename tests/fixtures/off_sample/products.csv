@@ -1,0 +1,22 @@
+code,product_name,brands,categories_tags,ingredients_text,nutriscore_grade,ecoscore_grade,labels_tags,quantity,serving_quantity,serving_size,energy_100g,fat_100g,saturated-fat_100g,carbohydrates_100g,sugars_100g,fiber_100g,proteins_100g,salt_100g,sodium_100g
+3038350011027,"Peanut Butter, Creamy","Jif","en:peanut-butter","Peanuts, Sugar, Hydrogenated Vegetable Oil (Cottonseed, Soybean, and Rapeseed Oils), Salt","d","e","","200 g",10,"20 g",2065,50,8,20,9,2.5,25,0.5,200
+3038350011034,"Peanut Butter, Crunchy","Jif","en:peanut-butter","Peanuts, Sugar, Hydrogenated Vegetable Oil (Cottonseed, Soybean, and Rapeseed Oils), Salt","d","e","","200 g",10,"20 g",2065,50,8,20,9,2.5,25,0.5,200
+3017620422003,"Nutella Hazelnut Spread","Ferrero","en:hazelnut-spread","Sugar, Hazelnuts, Cocoa, Skimmed Milk Powder, Fat-Reduced Cocoa, Palm Oil, Soy Lecithin, Vanillin","e","d","","400 g",20,"20 g",2236,51,18,54,50,1.5,6,0.9,360
+3017620422010,"Nutella Hazelnut Spread","Ferrero","en:hazelnut-spread","Sugar, Hazelnuts, Cocoa, Skimmed Milk Powder, Fat-Reduced Cocoa, Palm Oil, Soy Lecithin, Vanillin","e","d","","750 g",20,"20 g",2236,51,18,54,50,1.5,6,0.9,360
+5449000000995,"Milk, Whole, Fresh","Local Dairy","en:whole-milk","Pasteurized Milk","a","a","","1 L",4,"250 ml",276,3.6,2.3,4.8,5,0,3.2,0.1,40
+5449000000988,"Milk, Skimmed","Local Dairy","en:skimmed-milk","Skimmed Milk, Vitamin A, Vitamin D","a","a","","1 L",4,"250 ml",164,0.1,0.05,4.8,5,0,3.3,0.1,40
+3027290205001,"Dark Chocolate 85%","Lindt","en:dark-chocolate","Chocolate, Cocoa Butter, Sugar, Soy Lecithin, Vanilla","d","c","","100 g",5,"20 g",2310,43,26,45,32,10.5,8,0.05,5
+3027290205018,"Dark Chocolate 70%","Lindt","en:dark-chocolate","Chocolate, Cocoa Butter, Sugar, Soy Lecithin, Vanilla","c","b","","100 g",5,"20 g",2280,40,24,48,33,10,7,0.05,5
+3006800100027,"Mineral Water, Still","Perrier","en:still-water","Water","a","a","","1.5 L",6,"250 ml",0,0,0,0,0,0,0,0,0
+3006800100034,"Mineral Water, Sparkling","Perrier","en:sparkling-water","Carbonated Water","a","a","","1.5 L",6,"250 ml",0,0,0,0,0,0,0,0,0
+3012140422025,"Olive Oil, Extra Virgin","Bertolli","en:extra-virgin-olive-oil","Extra Virgin Olive Oil","a","a","","500 ml",17,"30 ml",3320,99.9,13.8,0,0,0,0,0,0
+3012140422032,"Olive Oil, Pure","Bertolli","en:olive-oil","Olive Oil, Refined Olive Oil","b","b","","500 ml",17,"30 ml",3320,99.9,13.8,0,0,0,0,0,0
+3033650001201,"Rice, Long Grain, White","Uncle Ben's","en:long-grain-rice","Enriched Parboiled Rice","b","c","","1 kg",20,"50 g",1320,0.8,0.2,280,0.1,0,7,0,0
+3033650001218,"Rice, Brown","Uncle Ben's","en:brown-rice","Brown Rice","b","c","","1 kg",20,"50 g",1310,1.2,0.3,279,0.4,1.6,7,0,0
+3075120011111,"Cereal, Corn Flakes","Kellogg's","en:corn-flakes","Maize, Sugar, Salt, Wheat Bran, Vitamins and Minerals","d","d","","375 g",12,"30 g",1480,1.2,0.5,87,9,0,7,0.8,320
+3075120011128,"Cereal, Frosted Flakes","Kellogg's","en:frosted-flakes","Maize, Sugar, Salt, Wheat Bran, Vitamins and Minerals","d","d","","375 g",12,"30 g",1480,1.2,0.5,87,9,0,7,0.8,320
+3017620422025,"Hazelnut Chocolate, 100g","Ferrero","en:hazelnut-chocolate","Sugar, Hazelnuts, Cocoa, Milk, Cocoa Butter, Palm Oil, Soy Lecithin, Vanillin","e","d","","100 g",5,"20 g",2236,51,18,47,42,1.5,6,0.9,360
+3017620422032,"Hazelnut Chocolate, 200g","Ferrero","en:hazelnut-chocolate","Sugar, Hazelnuts, Cocoa, Milk, Cocoa Butter, Palm Oil, Soy Lecithin, Vanillin","e","d","","200 g",10,"20 g",2236,51,18,47,42,1.5,6,0.9,360
+invalid_code,"Product with invalid code","Test Brand","en:test","Test Ingredients","a","a","","100 g",1,"100 g",500,10,2,70,10,1,5,0.5,50
+,"Product with empty code","Test Brand","en:test","Test Ingredients","a","a","","100 g",1,"100 g",500,10,2,70,10,1,5,0.5,50
+3017620422049,"Nutella, No Serving Info","Ferrero","en:hazelnut-spread","Sugar, Hazelnuts, Cocoa, Skimmed Milk Powder, Fat-Reduced Cocoa, Palm Oil, Soy Lecithin, Vanillin","e","d","","400 g",,,2236,51,18,54,50,1.5,6,0.9,360

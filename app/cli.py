@@ -26,23 +26,38 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python3 -m foodcore.cli")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    build = sub.add_parser(
+    build_usda = sub.add_parser(
         "build-usda",
         help="turn a USDA FoodData Central CSV export into a compact dataset file",
     )
-    build.add_argument("--fdc-dir", required=True,
-                       help="directory containing food.csv, food_portion.csv, …")
-    build.add_argument("--out", required=True, help="dataset file to write")
-    build.add_argument("--dataset-version", required=True,
-                       help='upstream release id, e.g. "April 2025" — it is cited '
-                            "in every value's provenance")
-    build.add_argument("--retrieved", default=datetime.date.today().isoformat(),
-                       help="ISO date this export was downloaded (default: today)")
-    build.add_argument("--data-type", action="append", default=[],
-                       help="limit to an FDC data_type (repeatable), e.g. "
-                            "foundation_food. Default: everything in the export")
-    build.add_argument("--limit", type=int, default=None,
-                       help="stop after N foods (for a quick trial build)")
+    build_usda.add_argument("--fdc-dir", required=True,
+                            help="directory containing food.csv, food_portion.csv, …")
+    build_usda.add_argument("--out", required=True, help="dataset file to write")
+    build_usda.add_argument("--dataset-version", required=True,
+                            help='upstream release id, e.g. "April 2025" — it is cited '
+                                 "in every value's provenance")
+    build_usda.add_argument("--retrieved", default=datetime.date.today().isoformat(),
+                            help="ISO date this export was downloaded (default: today)")
+    build_usda.add_argument("--data-type", action="append", default=[],
+                            help="limit to an FDC data_type (repeatable), e.g. "
+                                 "foundation_food. Default: everything in the export")
+    build_usda.add_argument("--limit", type=int, default=None,
+                            help="stop after N foods (for a quick trial build)")
+
+    build_off = sub.add_parser(
+        "build-off",
+        help="turn an Open Food Facts products.csv export into a compact dataset file",
+    )
+    build_off.add_argument("--products-csv", required=True,
+                           help="path to products.csv from OFF export")
+    build_off.add_argument("--out", required=True, help="dataset file to write")
+    build_off.add_argument("--dataset-version", required=True,
+                           help='upstream release id, e.g. "2026-01-01" — it is cited '
+                                "in every value's provenance")
+    build_off.add_argument("--retrieved", default=datetime.date.today().isoformat(),
+                           help="ISO date this export was downloaded (default: today)")
+    build_off.add_argument("--limit", type=int, default=None,
+                           help="stop after N foods (for a quick trial build)")
 
     info = sub.add_parser("info", help="describe a dataset file")
     info.add_argument("--dataset", default=None,
@@ -52,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "build-usda":
         return _build_usda(args)
+    if args.command == "build-off":
+        return _build_off(args)
     return _info(args)
 
 
@@ -83,6 +100,50 @@ def _build_usda(args) -> int:
             builder="foodcore.cli build-usda",
         )
     except (UsdaImportError, DatasetError, ValueError) as exc:
+        # Typed domain exceptions with curated messages — not a raw traceback,
+        # not the csv module's text, and not the sqlite3 driver's.
+        print(f"foodcore: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"wrote {args.out}")
+    print(export.stats.report())
+    print("rows: " + ", ".join(f"{k}={v}" for k, v in counts.items()))
+    # The parser's count and the file's count must agree. When they do not,
+    # rows collapsed on a primary key, and the operator is the only one who can
+    # decide whether that matters — so say it rather than printing two numbers
+    # and hoping somebody compares them.
+    expected = {"foods": len(foods), "portions": len(portions),
+                "nutrients": len(nutrients)}
+    collapsed = {k: (v, counts[k]) for k, v in expected.items() if counts[k] != v}
+    if collapsed:
+        print("NOTE: rows collapsed on a primary key (parsed -> stored): "
+              + ", ".join(f"{k} {a}->{b}" for k, (a, b) in sorted(collapsed.items())),
+              file=sys.stderr)
+    return 0
+
+
+def _build_off(args) -> int:
+    # Imported here, not at module scope: the adapter is only needed by a build,
+    # and `foodcore.cli info` must work on a host that never imports a parser.
+    from .sources.off import OffImportError, load_off_csv
+
+    try:
+        export = load_off_csv(
+            args.products_csv,
+            version=args.dataset_version,
+            retrieved=args.retrieved,
+            limit=args.limit,
+        )
+        foods, portions, nutrients = export.rows()
+        counts = build_dataset(
+            args.out,
+            sources=[export.source_record()],
+            foods=foods,
+            portions=portions,
+            nutrients=nutrients,
+            builder="foodcore.cli build-off",
+        )
+    except (OffImportError, DatasetError, ValueError) as exc:
         # Typed domain exceptions with curated messages — not a raw traceback,
         # not the csv module's text, and not the sqlite3 driver's.
         print(f"foodcore: {exc}", file=sys.stderr)
