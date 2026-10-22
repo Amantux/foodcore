@@ -105,6 +105,7 @@ def test_public_surface_is_small_and_explicit():
         "SOURCES", "METHODS", "LICENSES",
         "SourceRecord",
         "Dataset", "FoodRow", "FoodRecord", "Portion", "FoodMatch",
+        "RankResult", "RankRow", "RankResolved", "RankUnresolved",
         "load_dataset", "build_dataset",
         "__version__", "RULE_EPOCH", "DATASET_SCHEMA_VERSION", "rule_version",
     }

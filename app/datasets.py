@@ -311,6 +311,89 @@ class FoodMatch:
         return "; ".join(out)
 
 
+@dataclass(frozen=True)
+class RankRow:
+    """One row in a ranked nutrient list.
+
+    Each row carries the food's identity, its per-100g amount with unit,
+    and full provenance naming the dataset snapshot.
+    """
+
+    food_key: str
+    name: str
+    amount: float
+    unit: str
+    provenance: Provenance
+
+
+@dataclass(frozen=True)
+class RankResult:
+    """The outcome of `rank_foods`.
+
+    The `rows` tuple contains all ranked foods, grouped by unit.
+    Each unit group is independently ranked and limit-cut.
+
+    `units` maps each unit to its (start, end) slice into `rows`.
+    For example, if rows[5:10] are kcal and rows[10:15] are kJ,
+    then units = {"kcal": (5, 10), "kJ": (10, 15)}.
+    """
+
+    rows: tuple[RankRow, ...]
+    units: dict[str, tuple[int, int]]  # unit -> (start_idx, end_idx)
+
+
+class RankUnresolved:
+    """Unresolved outcome for `rank_foods`.
+
+    This is not a dataclass to keep it simple — it's only used for
+    unresolved cases (unknown nutrient, empty result).
+    """
+
+    def __init__(self, reason: str, detail: str):
+        self.reason = reason
+        self.detail = detail
+
+    @property
+    def resolved(self) -> bool:
+        return False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"status": "unresolved", "reason": self.reason, "detail": self.detail}
+
+
+class RankResolved:
+    """Resolved outcome for `rank_foods`."""
+
+    def __init__(self, result: RankResult):
+        self._result = result
+
+    @property
+    def resolved(self) -> bool:
+        return True
+
+    @property
+    def result(self) -> RankResult:
+        return self._result
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": "resolved",
+            "result": {
+                "rows": [
+                    {
+                        "food_key": r.food_key,
+                        "name": r.name,
+                        "amount": r.amount,
+                        "unit": r.unit,
+                        "provenance": r.provenance.to_dict(),
+                    }
+                    for r in self._result.rows
+                ],
+                "units": self._result.units,
+            },
+        }
+
+
 #: Scores are by KIND of evidence with wide gaps, per the estate's resolution
 #: rule: a stronger kind of match always beats a pile of weaker ones.
 _SCORE_HEAD_EXACT = 100     # query IS the head noun ("butter" -> "Butter, salted")
@@ -796,6 +879,98 @@ class Dataset:
         """The snapshot date for ``provider``, or "" if this file has none."""
         snapshot = self._source_for(provider)
         return snapshot.retrieved_at if snapshot is not None else ""
+
+    def rank_foods(self, nutrient: str, *, limit: int = 10,
+                   lowest: bool = False) -> RankResolved | RankUnresolved:
+        """Rank foods by a nutrient's per-100g amount.
+
+        Returns a ranked list of foods with their per-100g amount, unit,
+        and full provenance naming the dataset snapshot.
+
+        **Unit handling (the MIXED-UNIT trap):** A nutrient may publish rows
+        in more than one unit (e.g. energy as KCAL vs KJ). This method never
+        compares per-100g numbers across different units. Instead, it groups
+        results by unit; each group is independently ranked and limit-cut.
+        The result's ``units`` dict maps each unit to its (start, end) slice
+        into ``rows``, so you can see which foods belong to which unit group.
+
+        Args:
+            nutrient: The nutrient name (case-insensitive).
+            limit: Maximum number of foods per unit group.
+            lowest: If True, return the leanest (lowest) values instead of richest.
+
+        Returns:
+            A ``RankResolved`` with the ranked rows, or ``RankUnresolved`` if
+            the nutrient is unknown.
+
+        Example:
+            >>> dataset.rank_foods("iron", limit=5)
+            RankResolved(rows=(...), units={"mg": (0, 5)})
+            >>> result = dataset.rank_foods("energy", lowest=True)
+            >>> for row in result.result.rows:
+            ...     print(row.name, row.amount, row.unit)
+        """
+        nutrient_key = (nutrient or "").strip().lower()
+        if not nutrient_key:
+            return RankUnresolved(
+                reason="empty_nutrient",
+                detail="Nutrient name is required."
+            )
+
+        # Fetch all rows for this nutrient, grouped by unit
+        rows = self._query(
+            "SELECT n.food_key, n.per_100g, n.unit, n.method, n.confidence, "
+            "n.source_id, f.name, f.provider "
+            "FROM nutrient n JOIN food f ON f.key = n.food_key "
+            "WHERE n.nutrient = ? "
+            "ORDER BY n.unit, n.per_100g" + (" ASC" if lowest else " DESC"),
+            (nutrient_key,)
+        )
+
+        if not rows:
+            return RankUnresolved(
+                reason="unknown_nutrient",
+                detail=f"The reference dataset does not contain nutrient {nutrient!r}."
+            )
+
+        # Group by unit and rank each group independently
+        from collections import defaultdict
+        by_unit: dict[str, list[sqlite3.Row]] = defaultdict(list)
+        for row in rows:
+            by_unit[row["unit"]].append(row)
+
+        # Build the result: rank each unit group and cut to limit
+        all_rows: list[RankRow] = []
+        units: dict[str, tuple[int, int]] = {}
+        start_idx = 0
+
+        for unit in sorted(by_unit.keys()):
+            unit_rows = by_unit[unit]
+            # Already ordered by per_100g in the SQL query
+            # Take only up to limit for this unit
+            cut_rows = unit_rows[:limit]
+
+            for r in cut_rows:
+                rank_row = RankRow(
+                    food_key=r["food_key"],
+                    name=r["name"],
+                    amount=float(r["per_100g"]),
+                    unit=r["unit"],
+                    provenance=self._provenance(
+                        r["provider"], r["source_id"], r["method"],
+                        float(r["confidence"]), "rank_foods/1"
+                    )
+                )
+                all_rows.append(rank_row)
+
+            end_idx = start_idx + len(cut_rows)
+            units[unit] = (start_idx, end_idx)
+            start_idx = end_idx
+
+        return RankResolved(RankResult(
+            rows=tuple(all_rows),
+            units=units
+        ))
 
 
 # --------------------------------------------------------------------------
