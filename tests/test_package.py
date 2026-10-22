@@ -107,6 +107,7 @@ def test_public_surface_is_small_and_explicit():
         "Dataset", "FoodRow", "FoodRecord", "Portion", "FoodMatch",
         "load_dataset", "build_dataset",
         "__version__", "RULE_EPOCH", "DATASET_SCHEMA_VERSION", "rule_version",
+        "line_query",
     }
 
 
