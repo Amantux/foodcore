@@ -48,6 +48,10 @@ from .datasets import (
     FoodRecord,
     FoodRow,
     Portion,
+    RankResult,
+    RankRow,
+    RankResolved,
+    RankUnresolved,
     build_dataset,
     load_dataset,
 )
@@ -132,6 +136,10 @@ __all__ = [
     "FoodRecord",
     "Portion",
     "FoodMatch",
+    "RankResult",
+    "RankRow",
+    "RankResolved",
+    "RankUnresolved",
     "load_dataset",
     "build_dataset",
     # versioning

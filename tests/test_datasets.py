@@ -746,3 +746,251 @@ def test_a_dataset_naming_an_unknown_provider_is_a_typed_error(tmp_path):
     with pytest.raises(DatasetError) as exc:
         load_dataset(path)
     assert "upgrade foodcore" in str(exc.value).lower()
+
+
+# --- rank_foods ---------------------------------------------------------
+
+
+def test_rank_foods_returns_richest_by_default(tmp_path):
+    """Rank foods by a nutrient in descending order (richest first)."""
+    dataset = load_dataset(write_dataset(str(tmp_path / "fc.sqlite")))
+
+    result = dataset.rank_foods("energy")
+
+    assert result.resolved is True
+    rows = result.result.rows
+    assert len(rows) == 1
+    assert rows[0].name == "Flour, wheat, white"
+    assert rows[0].amount == 364.0
+    assert rows[0].unit == "kcal"
+    assert rows[0].provenance.source == "usda"
+    assert rows[0].provenance.version == "rank_foods/1"
+
+
+def test_rank_foods_respects_limit_per_unit(tmp_path):
+    """Limit applies per unit group, not globally."""
+    # Build a dataset with multiple foods in the same unit
+    record = SourceRecord(
+        provider="usda",
+        dataset_version="April 2025",
+        retrieved_at="2025-04-01",
+        license="CC0-1.0",
+        record_count=3,
+    )
+    build_dataset(
+        str(tmp_path / "fc2.sqlite"),
+        sources=[record],
+        foods=[
+            {"key": "usda:1", "name": "Food A", "provider": "usda", "source_id": "1"},
+            {"key": "usda:2", "name": "Food B", "provider": "usda", "source_id": "2"},
+            {"key": "usda:3", "name": "Food C", "provider": "usda", "source_id": "3"},
+        ],
+        portions=[],
+        nutrients=[
+            {"food_key": "usda:1", "nutrient": "iron", "per_100g": 10.0, "unit": "mg",
+             "method": "measured", "confidence": 0.95, "source_id": "1"},
+            {"food_key": "usda:2", "nutrient": "iron", "per_100g": 5.0, "unit": "mg",
+             "method": "measured", "confidence": 0.95, "source_id": "2"},
+            {"food_key": "usda:3", "nutrient": "iron", "per_100g": 1.0, "unit": "mg",
+             "method": "measured", "confidence": 0.95, "source_id": "3"},
+        ],
+        builder="test",
+    )
+
+    dataset = load_dataset(str(tmp_path / "fc2.sqlite"))
+    result = dataset.rank_foods("iron", limit=2)
+
+    assert result.resolved is True
+    rows = result.result.rows
+    assert len(rows) == 2
+    # Should be sorted descending (richest first)
+    assert rows[0].amount == 10.0
+    assert rows[1].amount == 5.0
+
+
+def test_rank_foods_lowest_returns_leanest(tmp_path):
+    """lowest=True returns the leanest (lowest) values first."""
+    record = SourceRecord(
+        provider="usda",
+        dataset_version="April 2025",
+        retrieved_at="2025-04-01",
+        license="CC0-1.0",
+        record_count=3,
+    )
+    build_dataset(
+        str(tmp_path / "fc3.sqlite"),
+        sources=[record],
+        foods=[
+            {"key": "usda:1", "name": "Food A", "provider": "usda", "source_id": "1"},
+            {"key": "usda:2", "name": "Food B", "provider": "usda", "source_id": "2"},
+            {"key": "usda:3", "name": "Food C", "provider": "usda", "source_id": "3"},
+        ],
+        portions=[],
+        nutrients=[
+            {"food_key": "usda:1", "nutrient": "sodium", "per_100g": 100.0, "unit": "mg",
+             "method": "measured", "confidence": 0.95, "source_id": "1"},
+            {"food_key": "usda:2", "nutrient": "sodium", "per_100g": 50.0, "unit": "mg",
+             "method": "measured", "confidence": 0.95, "source_id": "2"},
+            {"food_key": "usda:3", "nutrient": "sodium", "per_100g": 10.0, "unit": "mg",
+             "method": "measured", "confidence": 0.95, "source_id": "3"},
+        ],
+        builder="test",
+    )
+
+    dataset = load_dataset(str(tmp_path / "fc3.sqlite"))
+    result = dataset.rank_foods("sodium", lowest=True)
+
+    assert result.resolved is True
+    rows = result.result.rows
+    assert len(rows) == 3
+    # Should be sorted ascending (lowest first)
+    assert rows[0].amount == 10.0
+    assert rows[1].amount == 50.0
+    assert rows[2].amount == 100.0
+
+
+def test_rank_foods_empty_result_for_unknown_nutrient(tmp_path):
+    """Unknown nutrient returns RankUnresolved, not an empty list."""
+    dataset = load_dataset(write_dataset(str(tmp_path / "fc.sqlite")))
+
+    result = dataset.rank_foods("unknown_nutrient_xyz")
+
+    assert result.resolved is False
+    assert result.reason == "unknown_nutrient"
+    assert "unknown_nutrient_xyz" in result.detail
+
+
+def test_rank_foods_empty_string_is_unknown_nutrient(tmp_path):
+    """Empty string nutrient returns RankUnresolved."""
+    dataset = load_dataset(write_dataset(str(tmp_path / "fc.sqlite")))
+
+    result = dataset.rank_foods("")
+
+    assert result.resolved is False
+    assert result.reason == "empty_nutrient"
+
+
+def test_rank_foods_mixed_units_are_grouped(tmp_path):
+    """Mixed-unit nutrients are grouped; each unit group is ranked independently."""
+    record = SourceRecord(
+        provider="usda",
+        dataset_version="April 2025",
+        retrieved_at="2025-04-01",
+        license="CC0-1.0",
+        record_count=4,
+    )
+    build_dataset(
+        str(tmp_path / "fc4.sqlite"),
+        sources=[record],
+        foods=[
+            {"key": "usda:1", "name": "Food A", "provider": "usda", "source_id": "1"},
+            {"key": "usda:2", "name": "Food B", "provider": "usda", "source_id": "2"},
+            {"key": "usda:3", "name": "Food C", "provider": "usda", "source_id": "3"},
+            {"key": "usda:4", "name": "Food D", "provider": "usda", "source_id": "4"},
+        ],
+        portions=[],
+        nutrients=[
+            # Energy in kcal
+            {"food_key": "usda:1", "nutrient": "energy", "per_100g": 500.0, "unit": "kcal",
+             "method": "measured", "confidence": 0.95, "source_id": "1"},
+            {"food_key": "usda:2", "nutrient": "energy", "per_100g": 300.0, "unit": "kcal",
+             "method": "measured", "confidence": 0.95, "source_id": "2"},
+            # Energy in kJ
+            {"food_key": "usda:3", "nutrient": "energy", "per_100g": 2000.0, "unit": "kJ",
+             "method": "measured", "confidence": 0.95, "source_id": "3"},
+            {"food_key": "usda:4", "nutrient": "energy", "per_100g": 1500.0, "unit": "kJ",
+             "method": "measured", "confidence": 0.95, "source_id": "4"},
+        ],
+        builder="test",
+    )
+
+    dataset = load_dataset(str(tmp_path / "fc4.sqlite"))
+    result = dataset.rank_foods("energy", limit=2)
+
+    assert result.resolved is True
+    rows = result.result.rows
+    units = result.result.units
+
+    # Should have two unit groups
+    assert set(units.keys()) == {"kJ", "kcal"}
+
+    # kcal group: Food A (500) > Food B (300)
+    kcal_start, kcal_end = units["kcal"]
+    kcal_rows = rows[kcal_start:kcal_end]
+    assert len(kcal_rows) == 2
+    assert kcal_rows[0].amount == 500.0
+    assert kcal_rows[1].amount == 300.0
+
+    # kJ group: Food C (2000) > Food D (1500)
+    kj_start, kj_end = units["kJ"]
+    kj_rows = rows[kj_start:kj_end]
+    assert len(kj_rows) == 2
+    assert kj_rows[0].amount == 2000.0
+    assert kj_rows[1].amount == 1500.0
+
+
+def test_rank_foods_provenance_on_every_row(tmp_path):
+    """Every row carries full provenance."""
+    record = SourceRecord(
+        provider="usda",
+        dataset_version="April 2025",
+        retrieved_at="2025-04-01",
+        license="CC0-1.0",
+        record_count=2,
+    )
+    build_dataset(
+        str(tmp_path / "fc5.sqlite"),
+        sources=[record],
+        foods=[
+            {"key": "usda:1", "name": "Food A", "provider": "usda", "source_id": "1"},
+            {"key": "usda:2", "name": "Food B", "provider": "usda", "source_id": "2"},
+        ],
+        portions=[],
+        nutrients=[
+            {"food_key": "usda:1", "nutrient": "protein", "per_100g": 10.0, "unit": "g",
+             "method": "measured", "confidence": 0.95, "source_id": "1"},
+            {"food_key": "usda:2", "nutrient": "protein", "per_100g": 5.0, "unit": "g",
+             "method": "measured", "confidence": 0.95, "source_id": "2"},
+        ],
+        builder="test",
+    )
+
+    dataset = load_dataset(str(tmp_path / "fc5.sqlite"))
+    result = dataset.rank_foods("protein")
+
+    assert result.resolved is True
+    for row in result.result.rows:
+        assert hasattr(row, "provenance")
+        assert row.provenance.source == "usda"
+        assert row.provenance.license == "CC0-1.0"
+        assert row.provenance.version == "rank_foods/1"
+
+
+def test_rank_foods_case_insensitive_nutrient(tmp_path):
+    """Nutrient lookup is case-insensitive."""
+    dataset = load_dataset(write_dataset(str(tmp_path / "fc.sqlite")))
+
+    result1 = dataset.rank_foods("energy")
+    result2 = dataset.rank_foods("ENERGY")
+    result3 = dataset.rank_foods("Energy")
+
+    assert result1.resolved is True
+    assert result2.resolved is True
+    assert result3.resolved is True
+    assert result1.result.rows[0].amount == result2.result.rows[0].amount
+    assert result2.result.rows[0].amount == result3.result.rows[0].amount
+
+
+def test_rank_foods_to_dict_roundtrip(tmp_path):
+    """RankResult can be serialized to dict and back."""
+    dataset = load_dataset(write_dataset(str(tmp_path / "fc.sqlite")))
+
+    result = dataset.rank_foods("energy")
+
+    assert result.resolved is True
+    d = result.to_dict()
+    assert d["status"] == "resolved"
+    assert "rows" in d["result"]
+    assert "units" in d["result"]
+    assert len(d["result"]["rows"]) == 1
+    assert "provenance" in d["result"]["rows"][0]
