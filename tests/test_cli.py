@@ -251,3 +251,98 @@ def test_info_on_a_missing_dataset_exits_nonzero(tmp_path, capsys):
 
     assert code == 1
     assert "absent.sqlite" in capsys.readouterr().err
+
+
+# --- search command -----------------------------------------------------
+
+def test_search_lists_candidates(tmp_path, capsys):
+    export = write_fdc_export(tmp_path / "export")
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    code = main(["search", "flour", "--dataset", str(out)])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    assert "flour" in out_text.lower()
+    assert "usda:1001" in out_text
+
+
+def test_search_with_resolve_confident(tmp_path, capsys):
+    export = write_fdc_export(tmp_path / "export")
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    # "flour" should resolve confidently (unique match)
+    code = main(["search", "flour", "--dataset", str(out), "--resolve"])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    assert "confident" in out_text
+
+
+def test_search_with_resolve_not_confident(tmp_path, capsys):
+    export = write_fdc_export(tmp_path / "export")
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    # "tomato" might not resolve confidently if there are multiple matches
+    code = main(["search", "tomato", "--dataset", str(out), "--resolve"])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    # At minimum it should say "not confident" or "confident"
+    assert "confident" in out_text or "not confident" in out_text
+
+
+def test_search_missing_dataset_exits_nonzero(tmp_path, capsys):
+    code = main(["search", "flour", "--dataset", str(tmp_path / "absent.sqlite")])
+    assert code == 1
+    assert "absent.sqlite" in capsys.readouterr().err
+
+
+# --- portion command ----------------------------------------------------
+
+def test_portion_resolved(tmp_path, capsys):
+    export = write_fdc_export(tmp_path / "export")
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    code = main(["portion", "usda:1001", "cup", "--dataset", str(out)])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    assert "125.0" in out_text
+    assert "g" in out_text
+    assert "provenance:" in out_text
+
+
+def test_portion_no_portion_data(tmp_path, capsys):
+    export = write_fdc_export(tmp_path / "export")
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    # Use a measure that doesn't exist for this food
+    code = main(["portion", "usda:1001", "gallon", "--dataset", str(out)])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    assert "Unresolved:" in out_text
+    assert "no_portion_data" in out_text
+
+
+def test_portion_missing_dataset_exits_nonzero(tmp_path, capsys):
+    code = main(["portion", "usda:1001", "cup", "--dataset", str(tmp_path / "absent.sqlite")])
+    assert code == 1
+    assert "absent.sqlite" in capsys.readouterr().err
+
+
+def test_portion_bundled_fallback(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("FOODCORE_DATASET", raising=False)
+
+    # Try to look up a measure that exists in the bundled minimal dataset
+    code = main(["portion", "internal:water", "cup"])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    # Water should resolve to 236.588 g per cup in the bundled dataset
+    assert "g" in out_text
