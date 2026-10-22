@@ -30,7 +30,7 @@ Public surface (everything else is private)::
         FoodRow, FoodRecord, Portion, FoodMatch,     # its record types
         rule_version, __version__,                   # versioning
     )
-    from foodcore import convert, nutrition, allergens, dietary  # the engines
+    from foodcore import convert, nutrition, allergens, dietary, line_query  # noqa: F401
 
 **Import it as ``foodcore``, never as ``app``.** The directory is named ``app``
 for historical reasons and is installed under the name ``foodcore``; importing
@@ -93,13 +93,13 @@ def rule_version(kind: str) -> str:
     return f"{kind}/{RULE_EPOCH}"
 
 
-# The engines live in sibling modules. They are exposed lazily (PEP 562) so
-# that ``import foodcore`` works before they all exist, and so a host app that
-# only needs conversions does not pay for the rest.
-_ENGINES = ("convert", "nutrition", "allergens", "dietary")
+#: The engines live in sibling modules. They are exposed lazily (PEP 562) so
+#: that ``import foodcore`` works before they all exist, and so a host app that
+#: only needs conversions does not pay for the rest.
+_ENGINES = ("convert", "nutrition", "allergens", "dietary", "line_query")
 
 if TYPE_CHECKING:  # pragma: no cover - for type checkers only
-    from . import allergens, convert, dietary, nutrition  # noqa: F401
+    from . import allergens, convert, dietary, nutrition, line_query  # noqa: F401
 
 
 def __getattr__(name: str) -> Any:
@@ -139,4 +139,6 @@ __all__ = [
     "RULE_EPOCH",
     "DATASET_SCHEMA_VERSION",
     "rule_version",
+    # engines
+    "line_query",
 ]
