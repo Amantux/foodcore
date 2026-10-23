@@ -159,16 +159,64 @@ def _round_value(value: float, increment: float) -> float:
     return math.floor(value / increment + 0.5) * increment
 
 
+def _rule_matches(value: float, rule: RoundingRule, next_rule: RoundingRule | None) -> bool:
+    """Decide whether `rule` is the one that should apply to `value`.
+
+    Rules for a nutrient are a chain of adjacent ranges, each described only
+    by its own lower edge (`threshold` + `threshold_inclusive`); the upper
+    edge of a rule is implied by where the *next* rule's lower edge begins,
+    not stored separately. Two shapes occur in the table:
+
+    - A terminal increment rule (no `next_rule`) is open-ended: it matches
+      everything strictly above its own threshold (`value > threshold`).
+    - A non-terminal rule with `threshold_inclusive=False` is a "below this
+      shared boundary" rule — it is always immediately followed by a sibling
+      with the SAME threshold and `threshold_inclusive=True` (e.g. saturated
+      fat's "<5g" / ">=5g" split). It matches `value < threshold`.
+    - Any other rule (zero-value, special-text, or an inclusive increment
+      rule) matches from its own threshold upward, but is capped at the
+      next rule's threshold so it doesn't swallow that next rule's range.
+      The cap is inclusive of the next rule's threshold when that next rule
+      is itself exclusive of it (non-inclusive), and exclusive otherwise.
+    """
+    if rule.zero_value is not None and rule.threshold is not None:
+        return value < rule.threshold
+
+    if rule.special_text is not None or (rule.increment is not None and rule.threshold_inclusive):
+        if rule.threshold is None:
+            return True
+        lower_ok = value >= rule.threshold if rule.threshold_inclusive else value > rule.threshold
+        if not lower_ok:
+            return False
+        if next_rule is None or next_rule.threshold is None:
+            return True
+        if next_rule.threshold_inclusive:
+            return value < next_rule.threshold
+        return value <= next_rule.threshold
+
+    if rule.increment is not None:
+        if rule.threshold is None:
+            return True
+        if next_rule is not None:
+            # Non-terminal, non-inclusive rule: it owns everything below its
+            # own threshold (the sibling above the threshold is inclusive).
+            return value < rule.threshold
+        # Terminal, non-inclusive rule: open-ended above its threshold.
+        return value > rule.threshold
+
+    return False
+
+
 def _apply_rule(value: float, rule: RoundingRule) -> Resolved | Unresolved:
-    """Apply a single rounding rule to a value.
+    """Produce the Resolved/Unresolved outcome for a rule already matched.
 
     Args:
         value: The raw nutrient value.
-        rule: The rounding rule to apply.
+        rule: The rounding rule that `_rule_matches` has already selected.
 
     Returns:
-        A Resolved outcome with the rounded value and formatted text,
-        or an Unresolved outcome if the value is invalid.
+        A Resolved outcome with the rounded value, or an Unresolved outcome
+        if the value is invalid.
     """
     # Check for invalid values first
     if value < 0:
@@ -182,94 +230,68 @@ def _apply_rule(value: float, rule: RoundingRule) -> Resolved | Unresolved:
             detail=f"nutrient value must be finite, got {value}",
         )
 
-    # Check for zero threshold
     if rule.zero_value is not None:
-        if rule.threshold is not None and value < rule.threshold:
-            return Resolved(
-                value=0.0,
-                unit=rule.unit,
-                provenance=Provenance(
-                    source=SOURCE,
-                    source_id=f"rounding/{rule.nutrient}/zero",
-                    retrieved="internal",
-                    method=METHOD,
-                    version=VERSION,
-                    confidence=1.0,
-                    license=LICENSE,
-                ),
-            )
+        return Resolved(
+            value=0.0,
+            unit=rule.unit,
+            provenance=Provenance(
+                source=SOURCE,
+                source_id=f"rounding/{rule.nutrient}/zero",
+                retrieved="internal",
+                method=METHOD,
+                version=VERSION,
+                confidence=1.0,
+                license=LICENSE,
+            ),
+        )
 
-    # Check for special text (e.g., "less than 5 mg")
     if rule.special_text is not None:
-        if rule.threshold_inclusive and rule.threshold is not None and value >= rule.threshold:
-            return Resolved(
-                value=value,
-                unit=rule.unit,
-                provenance=Provenance(
-                    source=SOURCE,
-                    source_id=f"rounding/{rule.nutrient}/special",
-                    retrieved="internal",
-                    method=METHOD,
-                    version=VERSION,
-                    confidence=1.0,
-                    license=LICENSE,
-                ),
-            )
+        return Resolved(
+            value=value,
+            unit=rule.unit,
+            provenance=Provenance(
+                source=SOURCE,
+                source_id=f"rounding/{rule.nutrient}/special",
+                retrieved="internal",
+                method=METHOD,
+                version=VERSION,
+                confidence=1.0,
+                license=LICENSE,
+            ),
+        )
 
-    # Apply increment-based rounding
     if rule.increment is not None:
-        if rule.threshold is None:
-            rounded = _round_value(value, rule.increment)
-            return Resolved(
-                value=rounded,
-                unit=rule.unit,
-                provenance=Provenance(
-                    source=SOURCE,
-                    source_id=f"rounding/{rule.nutrient}/increment",
-                    retrieved="internal",
-                    method=METHOD,
-                    version=VERSION,
-                    confidence=1.0,
-                    license=LICENSE,
-                ),
-            )
-        if rule.threshold_inclusive:
-            if rule.threshold is not None and value >= rule.threshold:
-                rounded = _round_value(value, rule.increment)
-                return Resolved(
-                    value=rounded,
-                    unit=rule.unit,
-                    provenance=Provenance(
-                        source=SOURCE,
-                        source_id=f"rounding/{rule.nutrient}/increment",
-                        retrieved="internal",
-                        method=METHOD,
-                        version=VERSION,
-                        confidence=1.0,
-                        license=LICENSE,
-                    ),
-                )
-        else:
-            if rule.threshold is not None and value > rule.threshold:
-                rounded = _round_value(value, rule.increment)
-                return Resolved(
-                    value=rounded,
-                    unit=rule.unit,
-                    provenance=Provenance(
-                        source=SOURCE,
-                        source_id=f"rounding/{rule.nutrient}/increment",
-                        retrieved="internal",
-                        method=METHOD,
-                        version=VERSION,
-                        confidence=1.0,
-                        license=LICENSE,
-                    ),
-                )
+        rounded = _round_value(value, rule.increment)
+        return Resolved(
+            value=rounded,
+            unit=rule.unit,
+            provenance=Provenance(
+                source=SOURCE,
+                source_id=f"rounding/{rule.nutrient}/increment",
+                retrieved="internal",
+                method=METHOD,
+                version=VERSION,
+                confidence=1.0,
+                license=LICENSE,
+            ),
+        )
 
     return Unresolved(
         reason="no_matching_rule",
         detail=f"no rounding rule matched for {rule.nutrient} with value {value}",
     )
+
+
+def _find_matching_rule(
+    rules: tuple[RoundingRule, ...],
+    value: float,
+) -> RoundingRule | None:
+    """Find the single rule in `rules` (in order) that applies to `value`."""
+    for index, rule in enumerate(rules):
+        next_rule = rules[index + 1] if index + 1 < len(rules) else None
+        if _rule_matches(value, rule, next_rule):
+            return rule
+    return None
 
 
 def round_nutrient(
@@ -339,29 +361,13 @@ def round_nutrient(
             detail=f"unknown nutrient {nutrient!r}; valid nutrients are: {', '.join(sorted(ROUNDING_RULES.keys()))}",
         )
 
-    # Apply rules in order until one matches
-    for rule in rules:
-        if rule.zero_value is not None and rule.threshold is not None and value < rule.threshold:
-            return _apply_rule(value, rule)
-
-        if rule.special_text is not None:
-            if rule.threshold_inclusive and rule.threshold is not None and value >= rule.threshold:
-                return _apply_rule(value, rule)
-
-        if rule.increment is not None:
-            if rule.threshold is None:
-                return _apply_rule(value, rule)
-            if rule.threshold_inclusive:
-                if rule.threshold is not None and value >= rule.threshold:
-                    return _apply_rule(value, rule)
-            else:
-                if rule.threshold is not None and value > rule.threshold:
-                    return _apply_rule(value, rule)
-
-    return Unresolved(
-        reason="no_matching_rule",
-        detail=f"no rounding rule matched for {nutrient} with value {value}",
-    )
+    matched_rule = _find_matching_rule(rules, value)
+    if matched_rule is None:
+        return Unresolved(
+            reason="no_matching_rule",
+            detail=f"no rounding rule matched for {nutrient} with value {value}",
+        )
+    return _apply_rule(value, matched_rule)
 
 
 def round_nutrient_with_text(
@@ -412,27 +418,7 @@ def round_nutrient_with_text(
         )
 
     # Find the matching rule to get special text
-    matched_rule = None
-    for rule in rules:
-        if rule.zero_value is not None and rule.threshold is not None and value < rule.threshold:
-            matched_rule = rule
-            break
-        if rule.special_text is not None:
-            if rule.threshold_inclusive and rule.threshold is not None and value >= rule.threshold:
-                matched_rule = rule
-                break
-        if rule.increment is not None:
-            if rule.threshold is None:
-                matched_rule = rule
-                break
-            if rule.threshold_inclusive:
-                if rule.threshold is not None and value >= rule.threshold:
-                    matched_rule = rule
-                    break
-            else:
-                if rule.threshold is not None and value > rule.threshold:
-                    matched_rule = rule
-                    break
+    matched_rule = _find_matching_rule(rules, value)
 
     # Format the text
     if matched_rule and matched_rule.special_text:
