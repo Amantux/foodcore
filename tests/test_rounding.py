@@ -426,7 +426,6 @@ def test_negative_value():
 
 def test_nan_value():
     """NaN values are rejected."""
-    import math
 
     result = round_nutrient("calories", float("nan"))
     assert not result.resolved

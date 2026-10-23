@@ -25,7 +25,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
-from typing import Union
 
 from ..provenance import Provenance, Resolved, Unresolved
 
@@ -452,6 +451,7 @@ def round_nutrient_with_text(
         value=result.value,
         unit=result.unit,
         provenance=result.provenance,
+        text=text,
     )
 
 
