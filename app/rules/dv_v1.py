@@ -115,7 +115,6 @@ def percent(nutrient_id: str, amount: float, *, version: str | None = None) -> R
         >>> percent("protein", 30)
         Unresolved("no_daily_value", ...)
     """
-    from ..nutrition import NUTRIENTS
 
     if nutrient_id not in _DV_TABLE and nutrient_id not in NO_DV_IDS:
         return Unresolved(

@@ -27,11 +27,9 @@ from typing import Mapping
 
 from .provenance import Resolved, Unresolved
 from .rules.dv_v1 import (
-    VERSION,
     DailyValue,
     NO_DV_IDS,
     _DV_TABLE,
-    get_daily_value,
     panel as _panel,
     percent as _percent,
 )
