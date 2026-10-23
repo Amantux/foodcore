@@ -785,7 +785,7 @@ def _total(
     total_weight = sum(weights)
     if total_weight > 0:
         mean_conf = sum(
-            _clamp01(p.confidence) * w for p, w in zip(provs, weights, strict=True)
+            _clamp01(p.confidence) * w for p, w in zip(provs, weights)
         ) / total_weight
     else:
         mean_conf = sum(_clamp01(p.confidence) for p in provs) / len(provs)
