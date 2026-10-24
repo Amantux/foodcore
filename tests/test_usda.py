@@ -8,11 +8,12 @@ file, and is what the tests about *resolution policy* use — that policy moved
 into the one `Dataset` when the two Dataset classes were collapsed, and it is
 only honest to test it where it now lives.
 """
+import csv
 import os
 
 import pytest
 
-from foodcore.nutrition import NUTRIENTS, known_unit
+from foodcore.nutrition import NUTRIENTS, commensurable
 from foodcore.sources.usda import (
     NUTRIENT_NAME_UNIT_EXCLUSIONS,
     NUTRIENT_NAMES,
@@ -239,6 +240,24 @@ def test_nutrients_are_keyed_by_foodcores_own_vocabulary(export):
 # imported and every consumer saw "this food has no data" for 21 of the 26
 # nutrients it was told it could ask for.
 
+def _published_nutrient_units() -> dict[str, set[str]]:
+    """Lower-cased FDC nutrient name -> every unit USDA publishes it in.
+
+    From `fixtures/fdc_nutrient_units.csv`, which is derived from the real
+    exports (SR Legacy 2018-04 and Foundation 2025-04-24) and lists only rows
+    that actually carry data in at least one of them. Re-derive it, don't
+    hand-edit it, if a newer export is adopted.
+    """
+    path = os.path.join(os.path.dirname(FIXTURE_DIR), "fdc_nutrient_units.csv")
+    published: dict[str, set[str]] = {}
+    with open(path, newline="") as handle:
+        for row in csv.DictReader(handle):
+            published.setdefault(row["name"].strip().lower(), set()).add(
+                row["unit_name"].strip().lower()
+            )
+    return published
+
+
 def test_importer_targets_are_a_subset_of_the_declared_registry():
     """THE guard. Every id this module can emit must be declared in
     `nutrition.NUTRIENTS`.
@@ -261,21 +280,117 @@ def test_importer_targets_are_a_subset_of_the_declared_registry():
     )
 
 
-def test_every_importer_target_is_stored_in_its_declared_unit():
-    """The subset test's other half.
+def test_every_mapped_name_is_really_published_in_a_convertible_unit():
+    """The subset test's other half, checked against the REAL published units.
 
     Agreeing on the *name* and disagreeing on the *unit* is the same bug one
-    level down, and it is not hypothetical: "Energy" is published twice by FDC,
-    in KCAL and in kJ, so mapping purely by name put 4,683 foods' energy in kJ
-    and 3,110 in kcal into one column. Every unit this importer can attach must
-    be one the engine can convert, and the keys it maps must be commensurable
-    with what the registry declares.
+    level down: the name map fixes which KEY a row lands on and says nothing
+    about whether the value can be read in that key's declared unit. Mapping
+    "Vitamin A, IU" instead of "Vitamin A, RAE" is a one-character slip that
+    stores IU under a µg-declared key, and every reader then scales it as
+    micrograms.
+
+    This reads `fixtures/fdc_nutrient_units.csv` — the real `(name, unit_name)`
+    pairs USDA publishes, extracted from both the SR Legacy 2018-04 and
+    Foundation 2025-04-24 exports. Asserting against the export rather than
+    against our own dict is the point: an earlier version of this test only
+    checked that `NUTRIENTS[key].unit` was a unit `nutrition.py` knows, which
+    is a tautology about a hand-written literal and stayed green when vitamin A
+    was deliberately mapped to the IU row.
     """
-    for key in sorted(set(NUTRIENT_NAMES.values())):
+    published = _published_nutrient_units()
+
+    for name, key in sorted(NUTRIENT_NAMES.items()):
+        units = published.get(name)
+        assert units, (
+            f"NUTRIENT_NAMES maps {name!r} -> {key!r}, but USDA publishes no "
+            "nutrient by that name in either export. The mapping is dead: it "
+            "can never match a row. Check the exact published spelling in "
+            "fixtures/fdc_nutrient_units.csv."
+        )
         declared = NUTRIENTS[key]
-        assert known_unit(declared.unit), (
-            f"{key} is declared in {declared.unit!r}, which nutrition.py "
-            "cannot convert — the importer could not emit a usable value."
+        usable = [u for u in units
+                  if (name, u) not in NUTRIENT_NAME_UNIT_EXCLUSIONS
+                  and commensurable(u, declared.unit)]
+        assert usable, (
+            f"{name!r} -> {key!r}: USDA publishes it in {sorted(units)}, none "
+            f"of which converts to {declared.unit!r} as declared for {key!r}. "
+            "IU is the usual culprit — it is compound-specific, so there is no "
+            "factor. Map the µg/mg row instead."
+        )
+
+
+def test_a_row_in_an_unconvertible_unit_is_refused_by_the_loader(tmp_path):
+    """MUTATION GUARD for the unit check inside `load_fdc_csv`.
+
+    The tests either side of this one police the MAP. Neither notices if the
+    LOADER stops checking, because the map it reads is correct — so this drives
+    the real parse with rows whose unit the engine cannot convert and asserts
+    they never land in the dataset.
+
+    Both inputs are real units FDC publishes (IU for vitamin A, MG_ATE for a
+    vitamin E entry). A future export renaming a row we already map is the
+    realistic way an unconvertible unit arrives under a mapped name, and then
+    only this check stands between it and a number every reader mis-scales.
+    """
+    tmp_path.joinpath("food.csv").write_text(
+        "fdc_id,data_type,description\n1,sr_legacy_food,Carrots\n"
+    )
+    # The same NAMES foodcore maps, but published in units it cannot convert.
+    tmp_path.joinpath("nutrient.csv").write_text(
+        "id,name,unit_name\n"
+        '1106,"Vitamin A, RAE",IU\n'
+        '1109,"Vitamin E (alpha-tocopherol)",MG_ATE\n'
+        '1162,"Vitamin C, total ascorbic acid",MG\n'
+        '1092,"Potassium, K",\n'
+    )
+    tmp_path.joinpath("food_nutrient.csv").write_text(
+        "fdc_id,nutrient_id,amount\n"
+        "1,1106,500.0\n"
+        "1,1109,2.0\n"
+        "1,1162,5.9\n"
+        "1,1092,320.0\n"
+    )
+
+    export = load_fdc_csv(str(tmp_path), version="v1", retrieved="2026-01-01")
+    stored = export.food("1").nutrients
+
+    assert "vitamin_a_rae" not in stored, (
+        f"IU stored under a µg-declared key: {stored.get('vitamin_a_rae')}"
+    )
+    assert "vitamin_e" not in stored
+    # A BLANK unit is refused too, rather than defaulted to grams. The loader
+    # used to do `or "g"`, which for a mg-declared mineral is a silent
+    # factor-of-1000 and for an energy row is a mass unit on an energy key.
+    assert "potassium" not in stored, (
+        f"a blank unit_name was assumed to be grams: {stored.get('potassium')}"
+    )
+    # The convertible row on the same food still imports: the guard rejects
+    # rows, not foods.
+    assert stored["vitamin_c"] == (5.9, "mg")
+    # Refused, and SAID so — naming the unit and the declared target.
+    report = export.stats.report()
+    assert "not convertible" in report and "vitamin_a_rae" in report
+
+
+def test_the_units_the_engine_cannot_convert_are_left_unmapped():
+    """The named half of the map tests: the specific rows we must NOT take.
+
+    These are real, high-coverage rows that look tempting — Vitamin A, IU is on
+    MORE foods (7,356) than the RAE row (6,918) — and taking any of them would
+    put an unconvertible unit under a declared key.
+    """
+    published = _published_nutrient_units()
+
+    for name, unit in [("vitamin a, iu", "iu"),
+                       ("vitamin d (d2 + d3), international units", "iu")]:
+        assert unit in published.get(name, ()), (
+            f"fixture no longer lists {name!r} in {unit!r} — if USDA changed "
+            "the export, re-derive the fixture before trusting this test."
+        )
+        assert name not in NUTRIENT_NAMES, (
+            f"{name!r} is published only in {unit!r}, which nutrition.py "
+            "cannot convert. Mapping it stores a number no reader can scale."
         )
 
 
@@ -323,9 +438,10 @@ def test_kilojoule_energy_row_is_dropped_by_the_loader(tmp_path):
 
 def test_both_published_spellings_of_total_sugars_map_to_one_key():
     # SR Legacy says "Sugars, Total"; Foundation says the NLEA-qualified name.
-    # Mapping only one silently drops sugar for half the dataset.
+    # Which id carries which spelling MOVES between exports, so mapping only
+    # one drops sugar for whichever export uses the other.
     assert NUTRIENT_NAMES["sugars, total"] == "sugar"
-    assert NUTRIENT_NAMES["sugars, total including nlea"] == "sugar"
+    assert NUTRIENT_NAMES["total sugars"] == "sugar"
 
 
 def test_two_spellings_disagreeing_is_reported_not_silently_last_wins(tmp_path):
@@ -344,7 +460,7 @@ def test_two_spellings_disagreeing_is_reported_not_silently_last_wins(tmp_path):
     tmp_path.joinpath("nutrient.csv").write_text(
         "id,name,unit_name\n"
         "2000,\"Sugars, Total\",G\n"
-        "1063,\"Sugars, total including NLEA\",G\n"
+        "1063,\"Total Sugars\",G\n"
     )
     tmp_path.joinpath("food_nutrient.csv").write_text(
         "fdc_id,nutrient_id,amount\n"

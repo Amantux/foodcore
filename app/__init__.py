@@ -78,7 +78,7 @@ RULE_EPOCH = 1
 #: open one built for a different schema rather than mis-reading it.
 #: 2 — portion rows carry size/qualifier/amount, so "cup, chopped" and
 #: "cup, sliced" stay distinct instead of colliding on one measure name.
-DATASET_SCHEMA_VERSION = 2
+DATASET_SCHEMA_VERSION = 3
 
 
 def rule_version(kind: str) -> str:

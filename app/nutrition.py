@@ -264,6 +264,22 @@ def known_unit(unit: str) -> bool:
     return normalize_unit(unit) in _UNIT_FACTORS
 
 
+def commensurable(from_unit: str, to_unit: str) -> bool:
+    """Can a value in ``from_unit`` be reported in ``to_unit``?
+
+    Public because an IMPORTER needs it: deciding that an upstream row can
+    legitimately be stored under a declared nutrient id means answering exactly
+    this question, and the answer has to come from the one unit table rather
+    than from a second copy of the dimension rules living in the adapter. `µg`
+    vs `ug` is commensurable (same unit, two spellings), `mg` vs `µg` is
+    commensurable (the reader scales), `IU` vs `µg` is not (IU is
+    compound-specific, so there is no factor), and `g` vs `kcal` is not.
+    """
+    a = _UNIT_FACTORS.get(normalize_unit(from_unit))
+    b = _UNIT_FACTORS.get(normalize_unit(to_unit))
+    return a is not None and b is not None and a[0] == b[0]
+
+
 def _convert(amount: float, from_unit: str, to_unit: str) -> float | None:
     """Convert within one dimension. ``None`` when not commensurable.
 
