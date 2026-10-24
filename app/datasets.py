@@ -138,7 +138,7 @@ CREATE INDEX portion_lookup ON portion (food_key, measure);
 
 CREATE TABLE nutrient (
     food_key   TEXT NOT NULL REFERENCES food (key),
-    nutrient   TEXT NOT NULL,     -- "energy", "protein", "fat_total", …
+    nutrient   TEXT NOT NULL,     -- "calories", "protein", "fat", …
     per_100g   REAL NOT NULL,
     unit       TEXT NOT NULL,     -- "kcal", "g", "mg"
     method     TEXT NOT NULL,

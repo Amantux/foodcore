@@ -44,6 +44,6 @@
     {"food_key": "internal:water", "measure": "gallon", "grams": 3785.4118, "method": "inferred", "confidence": 1.0, "source_id": "water"}
   ],
   "nutrients": [
-    {"food_key": "internal:water", "nutrient": "energy", "per_100g": 0.0, "unit": "kcal", "method": "inferred", "confidence": 1.0, "source_id": "water"}
+    {"food_key": "internal:water", "nutrient": "calories", "per_100g": 0.0, "unit": "kcal", "method": "inferred", "confidence": 1.0, "source_id": "water"}
   ]
 }

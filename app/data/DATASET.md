@@ -3,8 +3,14 @@
 `usda-sr-legacy-2018-04.sqlite.gz` — USDA FoodData Central, **SR Legacy, April
 2018 release**, built with `python3 -m foodcore.cli build-usda`.
 
-7,793 foods · 12,323 portion weights · 74,990 nutrient values · 2.3 MB
-compressed, 10.4 MB expanded.
+7,793 foods · 12,323 portion weights · 218,229 nutrient values · 5.7 MB
+compressed, 23.8 MB expanded.
+
+Every nutrient row is keyed by an id declared in `nutrition.NUTRIENTS` — all 31
+of them, with nothing stored under a name the registry has not published. See
+`sources/usda.py::NUTRIENT_NAMES` for the mapping and
+`tests/test_usda.py::test_importer_targets_are_a_subset_of_the_declared_registry`
+for the guard that keeps the two in step.
 
 ## Why this file is committed rather than downloaded at build time
 
@@ -18,8 +24,13 @@ build time makes every build — including a hotfix at 3am — contingent on
 `fdc.nal.usda.gov` answering. Committing it means the build is deterministic,
 reproducible years from now, and works with no network at all.
 
-2.3 MB is the price. It is paid once, by a repository that already carries a
-frontend lockfile of comparable size.
+5.7 MB is the price, up from 2.3 MB when the importer carried only 11 of the
+26 declared nutrients and dropped cholesterol, potassium, the B vitamins and
+every trace mineral on the floor. The extra 3.4 MB buys 143,239 nutrient values
+the export always contained and the build was discarding. It is paid once, in a
+repository that already carries a frontend lockfile of comparable size, and the
+alternative is every consumer being told "no data" for 21 of the 26 nutrients
+the public registry advertises.
 
 ## Licence
 
