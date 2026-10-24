@@ -187,3 +187,22 @@ def test_every_subpackage_is_declared_for_distribution():
         f"subpackage(s) {sorted(on_disk - declared)} exist on disk but are not "
         "declared in pyproject.toml, so they will be missing from the wheel."
     )
+
+
+def test_the_declared_version_matches_the_build_metadata():
+    """MUTATION GUARD. __version__ used to be a second hardcoded literal, and
+    it drifted: v0.2.1 and v0.2.2 were both cut while it still said "0.2.0", so
+    a consumer pinned to a tag and printing foodcore.__version__ got a
+    different answer from the one it had asked for — the exact ambiguity that
+    tagging releases was introduced to remove."""
+    import re
+
+    import foodcore
+
+    pyproject = (PKG_DIR.parent / "pyproject.toml").read_text()
+    declared = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M).group(1)
+
+    # In an installed environment these must agree exactly. In a bare source
+    # checkout there is no metadata, and the sentinel says so rather than
+    # inventing a number.
+    assert foodcore.__version__ in (declared, "0.0.0+source")

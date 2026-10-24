@@ -66,7 +66,20 @@ from .registry import SourceRecord
 #: The package version. Bumped on release; ``rule_version`` derives the
 #: algorithm versions that end up in ``Provenance.version`` from it, so a host
 #: app can always tell which foodcore computed a value it stored.
-__version__ = "0.2.0"
+# Read from the INSTALLED package metadata rather than hardcoded here, because
+# two declarations of one version drift — and did. v0.2.1 and v0.2.2 were both
+# cut while this line still said 0.2.0, so a consumer pinned to a tag and
+# printing foodcore.__version__ got a different answer from the one it asked
+# for. pyproject.toml is the single source now; this mirrors it.
+#
+# The fallback covers running from a source checkout that was never installed
+# (the conftest shim does exactly that), where there is no metadata to read.
+try:                                        # pragma: no cover - trivial branch
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("foodcore")
+except Exception:                           # pragma: no cover
+    __version__ = "0.0.0+source"
 
 #: The rule epoch — the leading number in every ``Provenance.version`` string.
 #: It is NOT the package version: a patch release that fixes a typo must not
