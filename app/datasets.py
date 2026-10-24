@@ -74,12 +74,27 @@ DATASET_ENV_VAR = "FOODCORE_DATASET"
 
 _BUNDLED_RESOURCE = "bundled.json"
 
-# Bumped when the table layout below changes incompatibly. A Dataset refuses to
-# open a file built for a DIFFERENT schema rather than silently mis-reading it.
+# Bumped when the table layout below OR THE VOCABULARY STORED IN IT changes
+# incompatibly. A Dataset refuses to open a file built for a DIFFERENT schema
+# rather than silently mis-reading it.
 # 2: portions gained size/qualifier/amount/seq_num/raw_text and foods gained a
 #    token index, so one food can publish "cup, chopped" and "cup, sliced"
 #    without them colliding on one primary key.
-_SCHEMA_VERSION = 2
+# 3: the nutrient vocabulary became `nutrition.NUTRIENTS`' ids (energy->calories,
+#    carbohydrate->carbs, fat_total->fat, fat_saturated->saturated_fat,
+#    sugars->sugar).
+#
+#    A rename is why "the vocabulary counts as the schema" is in this comment.
+#    The table LAYOUT is untouched, so a v2 file opens, queries and reads
+#    perfectly — and answers `Unresolved(reason="no_nutrient_data")` for every
+#    nutrient, with a curated message that sends the operator off to import a
+#    different dataset or pick a closer match. That is the exact
+#    indistinguishable-from-no-data failure this vocabulary change exists to
+#    remove, one layer down, and both host apps build their own file from an FDC
+#    export and pin foodcore by SHA — so moving the SHA without rebuilding is
+#    the normal way to hit it, not an exotic one. A stored key the reader cannot
+#    name is a schema break whatever the columns say.
+_SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);

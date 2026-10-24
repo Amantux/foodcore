@@ -584,6 +584,36 @@ def test_a_dataset_from_an_older_schema_is_refused(tmp_path):
     assert "rebuild" in str(exc.value).lower()
 
 
+def test_a_dataset_built_with_the_old_nutrient_vocabulary_is_refused(tmp_path):
+    """The schema bump that makes the nutrient rename detectable.
+
+    This is the one schema break where the table LAYOUT is identical, so
+    nothing about opening or querying a v2 file goes wrong. It reads
+    perfectly — and reports `no_nutrient_data` for all 31 nutrients, with a
+    curated message telling the operator to import a different dataset or pick
+    a closer match. A plausible wrong answer ("this food has no data") is worse
+    than a refusal that says "rebuild", which is the same reasoning as the test
+    above; the vocabulary is part of the contract even though it is not part of
+    the DDL.
+
+    Both host apps build their own file from an FDC export and pin foodcore by
+    SHA, so moving the SHA without rebuilding is the ordinary way to hit this.
+    """
+    import sqlite3
+
+    path = write_dataset(str(tmp_path / "fc.sqlite"))
+    conn = sqlite3.connect(path)
+    # Exactly what a 0.1.0 build produced: schema 2, old key spelling.
+    conn.execute("UPDATE meta SET value = '2' WHERE key = 'schema_version'")
+    conn.execute("UPDATE nutrient SET nutrient = 'energy' WHERE nutrient = 'calories'")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(DatasetError) as exc:
+        load_dataset(path)
+    assert "rebuild" in str(exc.value).lower()
+
+
 # --- the writer must not claim more than it stored ----------------------
 
 def test_build_counts_come_from_the_file_not_the_input(tmp_path):
