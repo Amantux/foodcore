@@ -59,6 +59,7 @@ import re
 from dataclasses import dataclass, field
 
 from ..datasets import FoodRecord, Portion
+from ..nutrition import NUTRIENTS, commensurable
 from ..registry import SourceRecord
 from ..units import extract_size, measure_key, normalise_unit
 
@@ -96,11 +97,25 @@ NUTRIENT_NAMES: dict[str, str] = {
     "total lipid (fat)": "fat",
     "carbohydrate, by difference": "carbs",
     "fiber, total dietary": "fiber",
-    # Both spellings are real: SR Legacy publishes "Sugars, Total" and the
-    # newer Foundation exports publish the NLEA-qualified name for the same
-    # quantity. Mapping only one silently drops sugar for half the dataset.
+    # Total sugars is published under two spellings, and WHICH id carries which
+    # spelling moves between exports — verified by reading both nutrient.csv
+    # files, not from memory:
+    #   SR Legacy 2018-04:  2000 "Sugars, Total" (6,007 rows) · 1063 "Sugars,
+    #                       Total NLEA" (0 rows)
+    #   Foundation 2025-04: 1063 "Sugars, Total" (160 rows) · 2000 "Total
+    #                       Sugars" (45 rows)
+    # So both names must be mapped, and neither is "the newer one". The
+    # previous entry here was `"sugars, total including nlea"`, which matches
+    # nothing in either export — a dead mapping that cost Foundation 40 foods
+    # their sugar value while looking like deliberate coverage.
+    # Five Foundation foods publish both ids; they take the clash path below,
+    # which is the documented behaviour for one key with two sources.
+    # NOT mapped: "Sugars, Total NLEA" — the real SR spelling, but zero rows in
+    # both exports, so there is nothing to verify a mapping against. Branded
+    # Foods is said to use NLEA spellings; that export has not been read here
+    # and a mapping we cannot check against data is what produced this bug.
     "sugars, total": "sugar",
-    "sugars, total including nlea": "sugar",
+    "total sugars": "sugar",
     "fatty acids, total saturated": "saturated_fat",
     "fatty acids, total trans": "trans_fat",
     "fatty acids, total polyunsaturated": "polyunsaturated_fat",
@@ -159,6 +174,28 @@ NUTRIENT_NAMES: dict[str, str] = {
 NUTRIENT_NAME_UNIT_EXCLUSIONS: frozenset[tuple[str, str]] = frozenset({
     ("energy", "kj"),
 })
+
+# KNOWN GAP — Foundation Foods energy, deliberately not fixed here.
+#
+# Newer Foundation exports publish energy under THREE names, all in KCAL:
+# 1008 "Energy" (analysed), 2048 "Energy (Atwater Specific Factors)" and
+# 2047 "Energy (Atwater General Factors)". Only 1008 is mapped, so in
+# Foundation 2025-04-24 just 135 of 411 foods get `calories`; 218 carry only
+# Atwater rows and 58 carry none.
+#
+# This is NOT two more dict lines. They are three DIFFERENT names, so the
+# duplicate-mapping guard below does not see them as one quantity in two
+# spellings — it sees a genuine clash, on the 318 foods that publish more than
+# one, and resolves it by file order. Those three figures differ numerically,
+# so file order would be silently choosing between three defensible answers.
+# Doing it properly means an explicit precedence (analysed > specific factors >
+# general factors) resolved per food AFTER collection, which the current
+# first-row-wins loop cannot express.
+#
+# It affects no shipped data: the bundled dataset is SR Legacy, where 2047 and
+# 2048 have zero rows. Recorded here rather than silently left, because
+# "unmapped" and "deliberately deferred" look identical from the outside — the
+# same confusion this module's vocabulary change exists to end.
 
 #: How a value from each FDC data type came to be known. Foundation and SR
 #: Legacy are laboratory analyses; branded values are what a manufacturer
@@ -266,7 +303,24 @@ class ImportStats:
         if self.missing_files:
             lines.append("missing files: " + ", ".join(sorted(self.missing_files)))
         if self.unmapped_nutrients:
-            top = sorted(self.unmapped_nutrients.items(), key=lambda kv: -kv[1])[:10]
+            # Deliberate refusals are listed SEPARATELY from things nobody has
+            # mapped yet. They are high-count by nature (one per food), so in a
+            # single list they crowd out the genuinely-unmapped names that the
+            # top-10 cut exists to surface — under a header telling the
+            # operator to "add to NUTRIENT_NAMES" a name that is already in it.
+            refused = {k: v for k, v in self.unmapped_nutrients.items()
+                       if "[excluded:" in k or "[unit not convertible" in k}
+            unmapped = {k: v for k, v in self.unmapped_nutrients.items()
+                        if k not in refused}
+            if refused:
+                top = sorted(refused.items(), key=lambda kv: -kv[1])[:10]
+                lines.append(
+                    "refused on purpose (no action needed): "
+                    + ", ".join(f"{name} x{count}" for name, count in top)
+                )
+            if not unmapped:
+                return "\n".join(lines)
+            top = sorted(unmapped.items(), key=lambda kv: -kv[1])[:10]
             lines.append(
                 "unmapped nutrients (add to NUTRIENT_NAMES to include): "
                 + ", ".join(f"{name} x{count}" for name, count in top)
@@ -486,7 +540,10 @@ def load_fdc_csv(directory: str, *, version: str | None = None,
         key = NUTRIENT_NAMES.get(name.lower())
         if key is None or (nutrient_keys is not None and key not in nutrient_keys):
             continue
-        unit = (r.get("unit_name") or "").strip().lower() or "g"
+        # No `or "g"` default. Guessing grams for a blank unit is how an energy
+        # row with an empty unit_name ended up storable as `calories` in "g" —
+        # a mass unit on an energy key, which nothing downstream would reject.
+        unit = (r.get("unit_name") or "").strip().lower()
         if (name.lower(), unit) in NUTRIENT_NAME_UNIT_EXCLUSIONS:
             # Same name, wrong unit for the key it maps to. Relabel so the
             # unmapped report says WHY rather than "add to NUTRIENT_NAMES"
@@ -496,10 +553,25 @@ def load_fdc_csv(directory: str, *, version: str | None = None,
                 f"{name} ({unit}) [excluded: NUTRIENT_NAME_UNIT_EXCLUSIONS]"
             )
             continue
+        # THE UNIT GUARD. A name map alone cannot keep the importer honest: it
+        # fixes which KEY a row lands on and says nothing about whether the
+        # value is in a unit that key can be read in. Mapping "Vitamin A, IU"
+        # instead of the RAE row is a one-character slip that stored IU under a
+        # µg-declared key, and every reader would then convert it as micrograms.
+        # So the unit is checked against the registry here, at the only place
+        # that knows both halves, and a row that fails is reported with the
+        # reason rather than stored.
+        declared = NUTRIENTS.get(key)
+        if declared is not None and not commensurable(unit, declared.unit):
+            unmapped_names[nid] = (
+                f"{name} ({unit or 'no unit'}) [unit not convertible to "
+                f"{declared.unit} as declared for {key!r}]"
+            )
+            continue
         # FDC writes energy in KCAL; normalising the spelling here keeps the
         # dataset's unit column a vocabulary rather than whatever case upstream
         # used.
-        nutrient_map[nid] = (key, "kcal" if key == "calories" and unit in {"kcal", ""}
+        nutrient_map[nid] = (key, "kcal" if key == "calories" and unit == "kcal"
                              else unit)
 
     nutrients: dict[str, dict[str, tuple[float, str]]] = {}
