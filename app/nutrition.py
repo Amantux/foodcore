@@ -232,6 +232,18 @@ NUTRIENTS: dict[str, Nutrient] = {
         _n("vitamin_b6", "Vitamin B6", "mg"),
         _n("folate", "Folate (DFE)", "µg"),
         _n("vitamin_b12", "Vitamin B12", "µg"),
+        # Declared because the USDA export the bundled dataset is built from
+        # carries all five on 6,800+ foods, every one of them in a unit this
+        # module already handles, and all five are label-eligible nutrients a
+        # consumer can reasonably render. A nutrient the importer could emit
+        # but the registry does not declare is reportable (the engine totals
+        # unregistered ids too) but unlabelled and in no canonical unit, which
+        # is a weaker contract than it needs to be for zero cost.
+        _n("phosphorus", "Phosphorus", "mg"),
+        _n("copper", "Copper", "mg"),
+        _n("selenium", "Selenium", "µg"),
+        _n("polyunsaturated_fat", "Polyunsaturated fat", "g"),
+        _n("monounsaturated_fat", "Monounsaturated fat", "g"),
     )
 }
 
