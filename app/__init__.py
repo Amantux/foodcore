@@ -66,7 +66,7 @@ from .registry import SourceRecord
 #: The package version. Bumped on release; ``rule_version`` derives the
 #: algorithm versions that end up in ``Provenance.version`` from it, so a host
 #: app can always tell which foodcore computed a value it stored.
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 #: The rule epoch — the leading number in every ``Provenance.version`` string.
 #: It is NOT the package version: a patch release that fixes a typo must not
