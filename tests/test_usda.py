@@ -12,7 +12,9 @@ import os
 
 import pytest
 
+from foodcore.nutrition import NUTRIENTS, known_unit
 from foodcore.sources.usda import (
+    NUTRIENT_NAME_UNIT_EXCLUSIONS,
     NUTRIENT_NAMES,
     UsdaImportError,
     load_fdc_csv,
@@ -226,11 +228,104 @@ def test_nutrients_are_keyed_by_foodcores_own_vocabulary(export):
     assert "protein" in flour.nutrients
 
 
+# --- ONE vocabulary: the registry is the contract --------------------------
+#
+# These three are the guard on the defect this module and `nutrition.py` spent
+# a release disagreeing about. The importer mapped 11 ids of its own invention
+# (`energy`, `carbohydrate`, `fat_total`, `fat_saturated`, `sugars`) while the
+# registry declared 26 (`calories`, `carbs`, `fat`, `saturated_fat`, `sugar`,
+# …); only 5 ids were common to both. Nothing failed, because an undeclared id
+# is still stored and still totalled — so the importer looked like it had
+# imported and every consumer saw "this food has no data" for 21 of the 26
+# nutrients it was told it could ask for.
+
+def test_importer_targets_are_a_subset_of_the_declared_registry():
+    """THE guard. Every id this module can emit must be declared in
+    `nutrition.NUTRIENTS`.
+
+    A mapping to an undeclared id must fail HERE, loudly, at the moment it is
+    written — not years later in a host app as a nutrient that is silently
+    always absent. The subset direction is the load-bearing one: the registry
+    is allowed to declare more than this export happens to contain (vitamin
+    A/D/E/K are not on every food), but the importer is never allowed to invent
+    a name the public surface has not declared.
+    """
+    targets = set(NUTRIENT_NAMES.values())
+    undeclared = sorted(targets - set(NUTRIENTS))
+
+    assert not undeclared, (
+        "usda.NUTRIENT_NAMES maps onto nutrient ids that nutrition.NUTRIENTS "
+        f"does not declare: {undeclared}. Rows stored under these keys are "
+        "unreadable by every consumer — declare them with `_n(...)` in the "
+        "registry, or map to the declared id instead of inventing one."
+    )
+
+
+def test_every_importer_target_is_stored_in_its_declared_unit():
+    """The subset test's other half.
+
+    Agreeing on the *name* and disagreeing on the *unit* is the same bug one
+    level down, and it is not hypothetical: "Energy" is published twice by FDC,
+    in KCAL and in kJ, so mapping purely by name put 4,683 foods' energy in kJ
+    and 3,110 in kcal into one column. Every unit this importer can attach must
+    be one the engine can convert, and the keys it maps must be commensurable
+    with what the registry declares.
+    """
+    for key in sorted(set(NUTRIENT_NAMES.values())):
+        declared = NUTRIENTS[key]
+        assert known_unit(declared.unit), (
+            f"{key} is declared in {declared.unit!r}, which nutrition.py "
+            "cannot convert — the importer could not emit a usable value."
+        )
+
+
+def test_the_second_energy_row_is_excluded_by_unit_not_by_luck():
+    """MUTATION GUARD for NUTRIENT_NAME_UNIT_EXCLUSIONS.
+
+    Both FDC "Energy" rows carry the name `energy`, so the name map alone
+    cannot tell them apart and silently stores whichever `food_nutrient.csv`
+    reaches first. Remove the exclusion and this test must fail.
+    """
+    assert ("energy", "kj") in NUTRIENT_NAME_UNIT_EXCLUSIONS
+    assert NUTRIENT_NAMES["energy"] == "calories"
+    assert NUTRIENTS["calories"].unit == "kcal"
+
+
+def test_kilojoule_energy_row_is_dropped_by_the_loader(tmp_path):
+    """The behavioural half of the test above.
+
+    Asserting the constant's contents passes even if the loader never consults
+    it, which is exactly the vacuous-guard shape. This drives the real parse
+    with the kJ row FIRST in file order, so first-wins would store kJ.
+    """
+    tmp_path.joinpath("food.csv").write_text(
+        "fdc_id,data_type,description\n1,sr_legacy_food,Flour\n"
+    )
+    tmp_path.joinpath("nutrient.csv").write_text(
+        "id,name,unit_name\n"
+        "1062,Energy,kJ\n"
+        "1008,Energy,KCAL\n"
+    )
+    tmp_path.joinpath("food_nutrient.csv").write_text(
+        "fdc_id,nutrient_id,amount\n"
+        "1,1062,1523.0\n"
+        "1,1008,364.0\n"
+    )
+
+    export = load_fdc_csv(str(tmp_path), version="v1", retrieved="2026-01-01")
+
+    assert export.food("1").nutrients["calories"] == (364.0, "kcal")
+    assert "energy" not in export.food("1").nutrients
+    # Dropped, but reported — and the report says why rather than telling the
+    # operator to add a name that is already mapped.
+    assert "NUTRIENT_NAME_UNIT_EXCLUSIONS" in export.stats.report()
+
+
 def test_both_published_spellings_of_total_sugars_map_to_one_key():
     # SR Legacy says "Sugars, Total"; Foundation says the NLEA-qualified name.
     # Mapping only one silently drops sugar for half the dataset.
-    assert NUTRIENT_NAMES["sugars, total"] == "sugars"
-    assert NUTRIENT_NAMES["sugars, total including nlea"] == "sugars"
+    assert NUTRIENT_NAMES["sugars, total"] == "sugar"
+    assert NUTRIENT_NAMES["sugars, total including nlea"] == "sugar"
 
 
 def test_two_spellings_disagreeing_is_reported_not_silently_last_wins(tmp_path):
@@ -259,14 +354,14 @@ def test_two_spellings_disagreeing_is_reported_not_silently_last_wins(tmp_path):
 
     export = load_fdc_csv(str(tmp_path), version="v1", retrieved="2026-01-01")
 
-    assert export.food("1").nutrients["sugars"] == (48.0, "g")   # first, not last
+    assert export.food("1").nutrients["sugar"] == (48.0, "g")   # first, not last
     clashes = [k for k in export.stats.unmapped_nutrients if "duplicate" in k]
     assert clashes, export.stats.unmapped_nutrients
-    assert "sugars" in export.stats.report()
+    assert "sugar" in export.stats.report()
 
 
 def test_energy_is_stored_in_kcal_not_upstreams_casing(export):
-    amount, unit = export.food(FLOUR).nutrients["energy"]
+    amount, unit = export.food(FLOUR).nutrients["calories"]
 
     assert unit == "kcal"
     assert amount > 0

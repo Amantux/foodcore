@@ -26,7 +26,7 @@ def write_dataset(path, *, provider="usda", license="CC0-1.0"):
                 "provider": provider, "source_id": "1"}],
         portions=[{"food_key": f"{provider}:1", "measure": "Cup", "grams": 125.0,
                    "method": "measured", "confidence": 0.95, "source_id": "1"}],
-        nutrients=[{"food_key": f"{provider}:1", "nutrient": "Energy",
+        nutrients=[{"food_key": f"{provider}:1", "nutrient": "Calories",
                     "per_100g": 364.0, "unit": "kcal", "method": "measured",
                     "confidence": 0.95, "source_id": "1"}],
         builder="test",
@@ -133,7 +133,7 @@ def test_unknown_portion_is_unresolved_not_zero(tmp_path):
 def test_nutrient_lookup_resolves_with_its_unit(tmp_path):
     dataset = load_dataset(write_dataset(str(tmp_path / "fc.sqlite")))
 
-    outcome = dataset.nutrient_per_100g("usda:1", "energy", version=VERSION)
+    outcome = dataset.nutrient_per_100g("usda:1", "calories", version=VERSION)
 
     assert (outcome.value, outcome.unit) == (364.0, "kcal")
 

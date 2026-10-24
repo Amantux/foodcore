@@ -73,28 +73,92 @@ SOURCE = "usda"
 LICENSE = "CC0-1.0"
 
 #: USDA's nutrient names → foodcore's nutrient keys. Matched lower-cased.
-#: Extend deliberately: a key that appears here becomes part of the dataset
-#: contract that engines query by.
+#:
+#: **The target of every entry here MUST be an id declared in
+#: `nutrition.NUTRIENTS`.** That is not a style rule, it is the whole point of
+#: this table, and `tests/test_usda.py` asserts it. The two halves of this
+#: package previously disagreed: the registry declared 26 ids while this map
+#: emitted 11 of its own invention, only 5 of which the registry had heard of.
+#: An id nothing declares still gets stored and still gets totalled, so the
+#: failure is silent on both sides — the importer looks like it imported and the
+#: consumer looks like the food has no data. Downstream (myMeal) was already
+#: carrying a hand-written translation table whose own comment noted that a
+#: missed key is "indistinguishable from 'this food has no data'". The registry
+#: ids win because they are the public, consumer-facing surface.
 #:
 #: Mapped by NAME, not by numeric id. Ids are stable in practice but are a thing
 #: we would be asserting from memory; a name map is inspectable, and anything
 #: unmapped is counted and reported rather than silently dropped.
 NUTRIENT_NAMES: dict[str, str] = {
-    "energy": "energy",
+    # --- macros and energy ---
+    "energy": "calories",
     "protein": "protein",
-    "total lipid (fat)": "fat_total",
-    "fatty acids, total saturated": "fat_saturated",
-    "carbohydrate, by difference": "carbohydrate",
+    "total lipid (fat)": "fat",
+    "carbohydrate, by difference": "carbs",
     "fiber, total dietary": "fiber",
     # Both spellings are real: SR Legacy publishes "Sugars, Total" and the
     # newer Foundation exports publish the NLEA-qualified name for the same
     # quantity. Mapping only one silently drops sugar for half the dataset.
-    "sugars, total": "sugars",
-    "sugars, total including nlea": "sugars",
+    "sugars, total": "sugar",
+    "sugars, total including nlea": "sugar",
+    "fatty acids, total saturated": "saturated_fat",
+    "fatty acids, total trans": "trans_fat",
+    "fatty acids, total polyunsaturated": "polyunsaturated_fat",
+    "fatty acids, total monounsaturated": "monounsaturated_fat",
+    "cholesterol": "cholesterol",
+    # --- minerals ---
     "sodium, na": "sodium",
     "calcium, ca": "calcium",
     "iron, fe": "iron",
+    "magnesium, mg": "magnesium",
+    "potassium, k": "potassium",
+    "zinc, zn": "zinc",
+    "phosphorus, p": "phosphorus",
+    "copper, cu": "copper",
+    "selenium, se": "selenium",
+    # --- vitamins ---
+    # Vitamin A comes from the RAE row and ONLY the RAE row. FDC also publishes
+    # "Vitamin A, IU" on marginally more foods, but IU is not a unit this
+    # package can convert (it is compound-specific, so there is no single
+    # factor), the registry declares `vitamin_a_rae` in µg, and retinol
+    # activity equivalents are what a label reports.
+    "vitamin a, rae": "vitamin_a_rae",
+    "vitamin c, total ascorbic acid": "vitamin_c",
+    # Same shape as vitamin A: the µg "(D2 + D3)" row, not the IU row.
+    "vitamin d (d2 + d3)": "vitamin_d",
+    # alpha-tocopherol, not "Vitamin E, added" (a subset) and not the IU or
+    # MG_ATE label entries (units we cannot convert).
+    "vitamin e (alpha-tocopherol)": "vitamin_e",
+    # Phylloquinone (K1). The menaquinone and dihydrophylloquinone rows are
+    # different compounds, not alternative spellings, so they are not folded in.
+    "vitamin k (phylloquinone)": "vitamin_k",
+    "thiamin": "thiamin",
+    "riboflavin": "riboflavin",
+    "niacin": "niacin",
+    "vitamin b-6": "vitamin_b6",
+    # DFE, because that is what the registry declares and what a label reports.
+    # "Folate, total" appears on ~370 more foods but is a different quantity
+    # (DFE weights folic acid 1.7x), so importing it as `folate` would be
+    # mislabelling, and importing both would make every fortified food a
+    # duplicate-mapping clash.
+    "folate, dfe": "folate",
+    "vitamin b-12": "vitamin_b12",
 }
+
+#: ``(lower-cased name, lower-cased unit_name)`` pairs that are deliberately
+#: NOT imported even though the name is mapped.
+#:
+#: FDC publishes **"Energy" twice** — once in KCAL (id 1008) and once in kJ
+#: (id 1062) — with the same name, on every food in SR Legacy. Mapping by name
+#: therefore mapped both onto one key, and since they are the same quantity in
+#: different units this was not extra data: whichever row `food_nutrient.csv`
+#: reached first won, so the shipped dataset stored 4,683 foods' energy in kJ
+#: and 3,110 in kcal *in the same column*. A consumer reading the number
+#: without reading the unit column was wrong by 4.184x on 60% of the dataset.
+#: kcal is what `calories` is declared in, so the kJ row is dropped here.
+NUTRIENT_NAME_UNIT_EXCLUSIONS: frozenset[tuple[str, str]] = frozenset({
+    ("energy", "kj"),
+})
 
 #: How a value from each FDC data type came to be known. Foundation and SR
 #: Legacy are laboratory analyses; branded values are what a manufacturer
@@ -423,10 +487,19 @@ def load_fdc_csv(directory: str, *, version: str | None = None,
         if key is None or (nutrient_keys is not None and key not in nutrient_keys):
             continue
         unit = (r.get("unit_name") or "").strip().lower() or "g"
-        # FDC writes energy in KCAL (and sometimes kJ rows we do not map);
-        # normalising the spelling here keeps the dataset's unit column a
-        # vocabulary rather than whatever case upstream used.
-        nutrient_map[nid] = (key, "kcal" if key == "energy" and unit in {"kcal", ""}
+        if (name.lower(), unit) in NUTRIENT_NAME_UNIT_EXCLUSIONS:
+            # Same name, wrong unit for the key it maps to. Relabel so the
+            # unmapped report says WHY rather than "add to NUTRIENT_NAMES"
+            # about a name that is already in it; the per-food counting then
+            # happens in the food_nutrient loop like any other unusable row.
+            unmapped_names[nid] = (
+                f"{name} ({unit}) [excluded: NUTRIENT_NAME_UNIT_EXCLUSIONS]"
+            )
+            continue
+        # FDC writes energy in KCAL; normalising the spelling here keeps the
+        # dataset's unit column a vocabulary rather than whatever case upstream
+        # used.
+        nutrient_map[nid] = (key, "kcal" if key == "calories" and unit in {"kcal", ""}
                              else unit)
 
     nutrients: dict[str, dict[str, tuple[float, str]]] = {}

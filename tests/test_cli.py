@@ -61,7 +61,7 @@ def test_the_parser_reads_foods_portions_and_mapped_nutrients(tmp_path):
         ("cup", 125.0, 1.0), ("cup", 250.0, 2.0)
     }
     assert {(n["nutrient"], n["per_100g"]) for n in nutrients} == {
-        ("energy", 364.0), ("protein", 10.3)
+        ("calories", 364.0), ("protein", 10.3)
     }
     assert stats.skipped_portions == 1
 
