@@ -36,7 +36,7 @@ from __future__ import annotations
 
 #: Bumped whenever a mapping changes meaning. Reaches Provenance.version, so a
 #: stored conversion can be traced to the assumption that produced it.
-VERSION = "household/2026.10.1"
+VERSION = "household/2026.10.2"
 
 #: Deliberately lower than a direct catalogue match (0.9) and than a derived
 #: density (0.8): this is a convention about language, sitting on top of a
@@ -81,6 +81,72 @@ HOUSEHOLD_FOODS: dict[str, tuple[str, str, str]] = {
     "vanilla extract": ("173471", "Vanilla extract", "exact"),
     "oats": ("173904", "Cereals, oats, regular and quick, not fortified, dry",
              "dry, as bought; cooked oats are a different weight entirely"),
+
+    # --- flours and sugars the matcher reaches but cannot name ---
+    #
+    # Every one of these HAS a published cup weight that the confidence-tiered
+    # matcher cannot get to from a cook's word, so the line silently fell back
+    # to a hand-written density or to the wrong flour. They are the highest-value
+    # entries in the table precisely because the data was already there.
+    "whole wheat flour": ("168893", "Wheat flour, whole-grain",
+                          "120 g/cup, not plain flour's 125 -- a different grain "
+                          "with different hydration. Consumers strip 'whole' "
+                          "during canonicalisation, so this is the only route "
+                          "to the right row"),
+    "wholemeal flour": ("168893", "Wheat flour, whole-grain", "British name"),
+    "wholewheat flour": ("168893", "Wheat flour, whole-grain", "one-word spelling"),
+    "bread flour": ("168896", "Wheat flour, white, bread, enriched",
+                    "137 g/cup against plain flour's 125. The 9.6% gap sits "
+                    "INSIDE a scoop tolerance, so answering with plain flour "
+                    "looked correct and was not"),
+    "strong flour": ("168896", "Wheat flour, white, bread, enriched",
+                     "British name for bread flour"),
+    "strong white flour": ("168896", "Wheat flour, white, bread, enriched", "British"),
+    "powdered sugar": ("169656", "Sugars, powdered",
+                       "120 g/cup unsifted against granulated's 200 -- aeration, "
+                       "not a qualifier"),
+    "icing sugar": ("169656", "Sugars, powdered", "British name"),
+    "confectioners sugar": ("169656", "Sugars, powdered", "American, spelled out"),
+    "confectioner's sugar": ("169656", "Sugars, powdered", "with the apostrophe"),
+    "cornmeal": ("169697", "Cornmeal, whole-grain, yellow",
+                 "122 g/cup. Degermed is 157, so the choice matters; whole-grain "
+                 "is what 'cornmeal' unqualified means in a recipe"),
+    "cream of tartar": ("175041", "Leavening agents, cream of tartar",
+                        "3 g/tsp; always measured by spoon, never by cup"),
+    "cocoa powder": ("169593", "Cocoa, dry powder, unsweetened",
+                     "unsweetened is the baking default; sweetened is a "
+                     "different product entirely"),
+    "breadcrumbs": ("174928", "Bread, crumbs, dry, grated, plain",
+                    "108 g/cup. The PLAIN row, not the seasoned one at 120 -- "
+                    "seasoned is a different product and a different weight"),
+    "bread crumbs": ("174928", "Bread, crumbs, dry, grated, plain", "spelled as two words"),
+    "molasses": ("168820", "Molasses",
+                 "337 g/cup. Filed as plain 'Molasses', NOT under 'Syrups' -- "
+                 "which is why a description search for it fails"),
+
+    # --- store-cupboard savoury ---
+    "garlic powder": ("171325", "Spices, garlic powder",
+                      "3.1 g/tsp. Distinct from fresh garlic by an order of "
+                      "magnitude, so resolving it to garlic is not a near-miss"),
+    "vinegar": ("172237", "Vinegar, distilled",
+                "238 g/cup. Unqualified vinegar is distilled white; a named "
+                "vinegar resolves on its own merits before reaching here"),
+    "white vinegar": ("172237", "Vinegar, distilled", "named"),
+    "ketchup": ("168556", "Catsup",
+                "240 g/cup. USDA files it under the archaic 'Catsup', so no "
+                "search for 'ketchup' can ever find it -- the single clearest "
+                "case for this table existing"),
+    "tomato ketchup": ("168556", "Catsup", "as written on the bottle"),
+    "lentils": ("172420", "Lentils, raw",
+                "192 g/cup RAW. Cooked lentils are a different weight; a line "
+                "saying 'cooked' carries that word and is handled upstream"),
+    "quinoa": ("168874", "Quinoa, uncooked",
+               "170 g/cup UNCOOKED. The cooked row (168917) is 185 and is the "
+               "one a description search lands on first"),
+    "parsley": ("170416", "Parsley, fresh",
+                "3.8 g/tbsp, which is how herbs are actually measured"),
+    "cream cheese": ("173418", "Cheese, cream",
+                     "232 g/cup. Not 'cheese' and not 'cream'; its own food"),
 
     # --- dairy ---
     "milk": ("171265", "Milk, whole, 3.25% milkfat, with added vitamin D",

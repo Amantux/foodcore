@@ -41,3 +41,37 @@ def dataset(export, tmp_path_factory):
     build_dataset(path, sources=[export.source_record()], foods=foods,
                   portions=portions, nutrients=nutrients, builder="tests")
     return load_dataset(str(path))
+
+
+@pytest.fixture(scope="session")
+def shipped_dataset(tmp_path_factory):
+    """The dataset this package actually SHIPS, expanded and loaded.
+
+    Distinct from `dataset` on purpose. That fixture is 37 carved-out foods,
+    which is the right size for testing the engines but is exactly the blind
+    spot `rules/household_v1` exists because of: the vocabulary was green
+    against the sample and useless against a real 7,793-food import, because
+    ambiguity is a property of the WHOLE catalogue and a sample cannot have it.
+
+    So any claim about a specific FDC id -- which food it names, what it
+    weighs -- has to be checked here or it is not checked at all. The curated
+    table is 73 hand-written numeric citations whose entire value is that a
+    reviewer can trust them.
+
+    Skips rather than fails when the asset is absent, so a source checkout
+    without the data file still runs the rest of the suite.
+    """
+    import gzip
+    import shutil
+
+    import foodcore
+
+    source = os.path.join(os.path.dirname(foodcore.__file__), "data",
+                          "usda-sr-legacy-2018-04.sqlite.gz")
+    if not os.path.isfile(source):
+        pytest.skip("the shipped reference dataset is not present in this checkout")
+
+    target = tmp_path_factory.mktemp("shipped") / "usda.sqlite"
+    with gzip.open(source, "rb") as src, open(target, "wb") as dst:
+        shutil.copyfileobj(src, dst, 1 << 20)
+    return load_dataset(str(target))
