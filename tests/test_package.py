@@ -5,6 +5,7 @@ time somebody reaches for a host app's convenience.
 """
 import ast
 import os
+import re
 import pathlib
 
 import pytest
@@ -135,10 +136,43 @@ def test_rule_version_rejects_a_pre_versioned_kind(bad):
         foodcore.rule_version(bad)
 
 
-def test_the_package_version_is_a_single_source_of_truth():
-    text = (PKG_DIR.parent / "pyproject.toml").read_text()
+#: What ``__version__`` becomes when there is no installed distribution to read
+#: it from. Named here so the test below cannot mistake a MALFORMED version for
+#: the source checkout and take the lenient branch.
+_SOURCE_SENTINEL = "0.0.0+source"
 
-    assert f'version = "{foodcore.__version__}"' in text
+
+def test_the_package_version_is_a_single_source_of_truth():
+    """pyproject declares the version; ``__version__`` mirrors it.
+
+    Two branches, because ``__version__`` is read from installed distribution
+    METADATA and a source checkout has none. This test asserted the equality
+    unconditionally and so could only pass where foodcore happened to be
+    pip-installed -- which is true on a dev box and false in CI, where the job
+    installs pytest and ruff and runs against the checkout via the root
+    conftest shim.
+
+    It therefore went red on main the moment ``__version__`` stopped being a
+    hardcoded literal, and stayed red across two commits while passing locally
+    for whoever made the change. Environment-dependent assertions are worth
+    writing carefully for exactly that reason: a local green says nothing.
+    """
+    text = (PKG_DIR.parent / "pyproject.toml").read_text()
+    declared = re.search(r'^version = "([^"]+)"', text, re.M)
+
+    assert declared, "pyproject.toml must declare a version -- it is the source"
+
+    if foodcore.__version__ == _SOURCE_SENTINEL:
+        # Uninstalled checkout: there is no metadata to compare against, so the
+        # single-source claim is all that can be checked here. The equality is
+        # covered by the clean-venv install test, which is where an INSTALLED
+        # artifact's version is the thing under test.
+        return
+
+    assert foodcore.__version__ == declared.group(1), (
+        f"installed metadata says {foodcore.__version__}, pyproject declares "
+        f"{declared.group(1)} -- two declarations of one version, which is the "
+        f"drift this derivation removed")
 
 
 def test_the_package_is_imported_as_foodcore_not_app():
