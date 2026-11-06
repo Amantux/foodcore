@@ -20,6 +20,7 @@ import datetime
 import sys
 
 from .datasets import DatasetError, build_dataset, load_dataset
+from . import rule_version
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,10 +50,36 @@ def main(argv: list[str] | None = None) -> int:
                       help="path to the dataset (default: $FOODCORE_DATASET, "
                            "else the bundled minimal one)")
 
+    search = sub.add_parser(
+        "search",
+        help="search foods by name; with --resolve, apply confidence policy"
+    )
+    search.add_argument("text", help="search text")
+    search.add_argument("--dataset", default=None,
+                        help="path to the dataset (default: $FOODCORE_DATASET)")
+    search.add_argument("--limit", type=int, default=10,
+                        help="max candidates to return (default: 10)")
+    search.add_argument("--resolve", action="store_true",
+                        help="apply resolve_food confidence policy")
+
+    portion = sub.add_parser(
+        "portion",
+        help="look up grams for one food+measure pair"
+    )
+    portion.add_argument("key", help="food key (e.g. usda:168893)")
+    portion.add_argument("measure", help="measure (e.g. cup, tbsp)")
+    portion.add_argument("--dataset", default=None,
+                         help="path to the dataset (default: $FOODCORE_DATASET)")
+
     args = parser.parse_args(argv)
     if args.command == "build-usda":
         return _build_usda(args)
-    return _info(args)
+    if args.command == "info":
+        return _info(args)
+    if args.command == "search":
+        return _search(args)
+    if args.command == "portion":
+        return _portion(args)
 
 
 def _build_usda(args) -> int:
@@ -124,6 +151,56 @@ def _info(args) -> int:
             f"(retrieved {record.retrieved_at}, {record.license}, "
             f"{record.record_count} records)"
         )
+    return 0
+
+
+def _search(args) -> int:
+    try:
+        dataset = load_dataset(args.dataset)
+    except DatasetError as exc:
+        print(f"foodcore: {exc}", file=sys.stderr)
+        return 1
+
+    if args.resolve:
+        match = dataset.resolve_food(args.text)
+        if match.confident:
+            print("confident")
+            rec = match.food
+            if rec:
+                print(rec.description)
+        else:
+            print("not confident")
+            if match.candidates:
+                print(match.describe(limit=args.limit))
+            else:
+                print("no candidates")
+    else:
+        rows = dataset.search_foods(args.text, limit=args.limit)
+        if not rows:
+            print("no matches")
+            return 0
+        for row in rows:
+            print(f"{row.key} {row.name}")
+    return 0
+
+
+def _portion(args) -> int:
+    try:
+        dataset = load_dataset(args.dataset)
+    except DatasetError as exc:
+        print(f"foodcore: {exc}", file=sys.stderr)
+        return 1
+
+    outcome = dataset.portion_grams(args.key, args.measure,
+                                    version=rule_version("convert"))
+    if outcome.resolved:
+        print(f"{outcome.value} {outcome.unit}")
+        prov = outcome.provenance
+        print(f"provenance: {prov.source} {prov.source_id} "
+              f"({prov.method}, {prov.confidence}, {prov.license})")
+    else:
+        print(f"Unresolved: {outcome.reason}")
+        print(outcome.detail)
     return 0
 
 
