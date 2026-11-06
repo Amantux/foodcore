@@ -93,7 +93,9 @@ Everything else is private and may change without notice.
 | `SourceRecord` | one dataset snapshot as **plain frozen data**: provider, dataset version, retrieved date, licence, record count, notes. `to_dict()` / `from_dict()`, and `provenance(...)` to mint a `Provenance` that cannot disagree with the snapshot it came from |
 | `build_dataset(out_path, *, sources, foods, portions, nutrients)` | write a dataset file (used by the CLI, tests, and any host with a source foodcore has no adapter for). Returns row counts **counted from the finished file**, so rows that collapsed on a primary key are reported as one — compare them against what you passed in. Raises `DatasetError` for a bad destination, `ValueError` for a bad row |
 | `rule_version(kind)`, `RULE_EPOCH`, `__version__`, `DATASET_SCHEMA_VERSION` | versioning (see below) |
-| `foodcore.convert`, `.nutrition`, `.allergens`, `.dietary` | the engines, imported lazily so `import foodcore` works without them |
+| `foodcore.convert`, `.nutrition`, `.allergens`, `.dietary`, `.dv` | the engines, imported lazily so `import foodcore` works without them |
+| `foodcore.dv.percent(nutrient_id, amount, *, version)` | compute % Daily Value for a nutrient amount. Returns `Resolved(percent, "%")` if a DV exists, `Unresolved("no_daily_value")` for nutrients FDA doesn't define (protein, trans_fat, sugar), or `Unresolved("unknown_nutrient")` for unknown ids |
+| `foodcore.dv.panel(mapping, *, version)` | compute % Daily Value for multiple nutrients at once. Returns `{nutrient_id: Outcome}` |
 
 Two ways to get from a name to a food, and they are not interchangeable:
 
@@ -241,6 +243,7 @@ it. An ORM base class here would drag SQLAlchemy into every consumer.
 | Epoch | What changed |
 |---|---|
 | 1 | Initial release. |
+| 1 | Added `%Daily Value` engine (`foodcore.dv.percent`, `foodcore.dv.panel`) with FDA 21 CFR 101.9 reference values. |
 
 Dataset schema history:
 
