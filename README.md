@@ -85,11 +85,12 @@ Everything else is private and may change without notice.
 | `Provenance`, `Resolved`, `Unresolved`, `Outcome` | the contract above. `Outcome = Resolved \| Unresolved` is the return type to annotate |
 | `VocabularyError`, `SOURCES`, `METHODS`, `LICENSES` | the closed vocabularies and the error raised on a violation |
 | `load_dataset(path=None, *, allow_minimal=True)` | open the reference dataset (see below) |
-| `Dataset` | the **one** reference dataset (see below). `portion_grams(food_key, measure, *, version)`, `nutrient_per_100g(food_key, nutrient, *, version)` → `Outcome`; `food_record(key)` → `FoodRecord`; `resolve_food(text)` → `FoodMatch`; `search_foods(text, limit)` → `[FoodRow]`; `food(key)` → `FoodRow`; `provenance_for(...)`, `retrieved_for(provider)`; `sources` → `(SourceRecord, …)`; `is_minimal`, `path`, `schema_version` |
+| `Dataset` | the **one** reference dataset (see below). `portion_grams(food_key, measure, *, version)`, `nutrient_per_100g(food_key, nutrient, *, version)` → `Outcome`; `rank_foods(nutrient, *, limit=10, lowest=False)` → `RankResolved | RankUnresolved`; `food_record(key)` → `FoodRecord`; `resolve_food(text)` → `FoodMatch`; `search_foods(text, limit)` → `[FoodRow]`; `food(key)` → `FoodRow`; `provenance_for(...)`, `retrieved_for(provider)`; `sources` → `(SourceRecord, …)`; `is_minimal`, `path`, `schema_version` |
 | `FoodRow` | `key`, `name`, `provider`, `source_id` — a **candidate**, without measurements. What `search_foods` returns |
 | `FoodRecord` | a food **with** its `portions` and `nutrients`, plus `head` / `tokens` / `states` and the selection helpers `portion(measure, size=None)`, `sized_portions`, `qualified_portions`, `volume_portion`. What the engines take |
 | `Portion` | one measured portion: `measure`, `size`, `qualifier`, `amount`, `gram_weight`, `grams_per_unit`, `method`, `confidence`, `source_id`, `raw_text` |
 | `FoodMatch` | `query`, `confident`, `candidates` → `((FoodRecord, score), …)`, `food` (None unless confident), `describe(limit)` |
+| `RankResult`, `RankRow`, `RankResolved`, `RankUnresolved` | the return type and helpers for `rank_foods`. `RankResult.rows` holds all ranked foods grouped by unit; `RankResult.units` maps each unit to its (start, end) slice. Use `.to_dict()` on either outcome type for serialization. |
 | `SourceRecord` | one dataset snapshot as **plain frozen data**: provider, dataset version, retrieved date, licence, record count, notes. `to_dict()` / `from_dict()`, and `provenance(...)` to mint a `Provenance` that cannot disagree with the snapshot it came from |
 | `build_dataset(out_path, *, sources, foods, portions, nutrients)` | write a dataset file (used by the CLI, tests, and any host with a source foodcore has no adapter for). Returns row counts **counted from the finished file**, so rows that collapsed on a primary key are reported as one — compare them against what you passed in. Raises `DatasetError` for a bad destination, `ValueError` for a bad row |
 | `rule_version(kind)`, `RULE_EPOCH`, `__version__`, `DATASET_SCHEMA_VERSION` | versioning (see below) |
@@ -111,6 +112,37 @@ Two ways to get from a name to a food, and they are not interchangeable:
 whose `portions` is empty means *this food publishes no portions*, and a
 candidate list must not say that about every candidate. Ask for
 `food_record(key)` when you need the measurements.
+
+### Ranking foods by nutrient content
+
+`rank_foods(nutrient, *, limit=10, lowest=False)` returns a ranked list of foods
+by a nutrient's per-100g amount:
+
+```python
+import foodcore
+
+dataset = foodcore.load_dataset("/path/to/dataset.sqlite")
+
+# Top 10 iron-rich foods
+result = dataset.rank_foods("iron", limit=10)
+for row in result.result.rows:
+    print(f"{row.name}: {row.amount} {row.unit}")
+
+# Lowest-sodium foods (ascending order)
+result = dataset.rank_foods("sodium", lowest=True)
+for row in result.result.rows:
+    print(f"{row.name}: {row.amount} {row.unit}")
+
+# Handle unresolved nutrients
+result = dataset.rank_foods("unknown_nutrient")
+if not result.resolved:
+    print(f"Unknown nutrient: {result.detail}")
+```
+
+**Unit handling:** A nutrient may publish rows in more than one unit (e.g.
+energy as KCAL vs KJ). `rank_foods` never compares values across units; each
+unit group is ranked independently. Use `result.result.units` to see which
+foods belong to which unit group.
 
 ## Reference data: the host owns the file
 
