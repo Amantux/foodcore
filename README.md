@@ -112,6 +112,82 @@ whose `portions` is empty means *this food publishes no portions*, and a
 candidate list must not say that about every candidate. Ask for
 `food_record(key)` when you need the measurements.
 
+## Shopping list aggregation
+
+foodcore can merge ingredient lines from multiple recipes into a single shopping
+list, and then reduce that list by subtracting on-hand pantry/fridge inventory.
+
+### Merging recipe lines
+
+```python
+import foodcore
+from foodcore.nutrition import RecipeLine, Composition, NutrientAmount
+from foodcore.provenance import Resolved
+
+dataset = foodcore.load_dataset("/config/mymeal/foodcore.sqlite")
+
+# Create recipe lines for different ingredients
+flour_comp = Composition(
+    food_id="usda:168894",
+    description="Flour, all-purpose, white",
+    basis="raw",
+    per_100g={"energy": (455.0, "kcal")},
+    provenance=...,
+)
+line1 = RecipeLine(
+    label="Pasta Sauce: flour",
+    edible_grams=Resolved(200.0, "g", ...),
+    composition=flour_comp,
+)
+line2 = RecipeLine(
+    label="Baking: flour",
+    edible_grams=Resolved(100.0, "g", ...),
+    composition=flour_comp,
+)
+
+# Merge lines into a single shopping list
+shopping_list = foodcore.shopping.merge_lines(
+    [line1, line2],
+    dataset=dataset,
+    version=foodcore.rule_version("convert"),
+)
+
+# Result: one item with amount=300.0 g
+```
+
+### Subtracting on-hand inventory
+
+Once you have a merged shopping list, subtract on-hand pantry/fridge items to
+produce a final shopping list that only includes what you need to buy:
+
+```python
+# on_hand is a sequence of (food_id, amount, unit) tuples
+on_hand = [
+    ("usda:168894", 50.0, "g"),   # 50g flour you already have
+]
+
+result = foodcore.shopping.subtract_on_hand(
+    shopping_list,
+    on_hand,
+    dataset=dataset,
+    version=foodcore.rule_version("convert"),
+)
+
+# Result: flour amount reduced to 250g
+# Items fully covered by on-hand stock get on_hand_covered=True
+# Items that cannot be unit-converted keep original amount with unresolved_on_hand_reason
+```
+
+The function:
+
+- Matches items by `food_id` (e.g., "usda:168894")
+- Converts on-hand units to the shopping list item's unit using the same
+  `convert()` logic as `merge_lines`
+- Marks fully covered items with `on_hand_covered=True` so host apps can show
+  "have enough: flour" instead of silently removing the line
+- Marks items that cannot be unit-converted with `unresolved_on_hand_reason="on_hand_unit_mismatch"`
+  so discrepancies are visible, never silently ignored
+
 ## Reference data: the host owns the file
 
 foodcore never looks in a hardcoded location — a library guessing at `/data` is
