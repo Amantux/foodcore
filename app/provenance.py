@@ -137,6 +137,7 @@ class Resolved:    # a value we can stand behind
     value: float
     unit: str
     provenance: Provenance
+    text: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.provenance, Provenance):
