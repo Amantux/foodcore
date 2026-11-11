@@ -8,7 +8,8 @@ request path:
 
     python3 -m foodcore.cli info --dataset /config/mymeal/foodcore.sqlite
 
-    python3 -m foodcore.cli lookup <query> [--dataset ...] [--limit ...]
+    python3 -m foodcore.cli lookup <query> [--dataset ...] [--limit ...] \
+        [--measure cup] [--nutrient energy]
 
 ``--dataset-version`` and ``--retrieved`` are **required** for a build because
 they become ``Provenance.dataset_version`` / ``retrieved`` on every value the
@@ -64,6 +65,12 @@ def main(argv: list[str] | None = None) -> int:
     lookup.add_argument("--dataset", default=None,
                         help="path to the dataset (default: $FOODCORE_DATASET, "
                              "else the bundled minimal one)")
+    lookup.add_argument("--measure", default=None, metavar="MEASURE",
+                        help="also resolve this household measure (e.g. cup) "
+                             "through portion_grams and print its Outcome")
+    lookup.add_argument("--nutrient", default=None, metavar="NUTRIENT",
+                        help="also resolve this nutrient (e.g. energy) through "
+                             "nutrient_per_100g and print its Outcome")
     lookup.add_argument("--limit", type=int, default=10,
                         help="max candidates to show for ambiguous queries (default: 10)")
 
@@ -149,6 +156,8 @@ def _info(args) -> int:
 
 def _lookup(args) -> int:
     """Resolve or search for a food name and print the result."""
+    from . import rule_version  # the package __init__; keeps import-time lean
+
     try:
         dataset = load_dataset(args.dataset)
     except DatasetError as exc:
@@ -187,6 +196,17 @@ def _lookup(args) -> int:
                 print(f"  {nutrient}: {amount} {unit}")
         else:
             print("Nutrients: none published")
+
+        # --measure / --nutrient: ask the same engines the host apps call, so
+        # this prints exactly what a host would get — provenance included.
+        if args.measure:
+            outcome = dataset.portion_grams(
+                food.key, args.measure, version=rule_version("convert"))
+            _print_outcome(f"Measure {args.measure!r}", outcome)
+        if args.nutrient:
+            outcome = dataset.nutrient_per_100g(
+                food.key, args.nutrient, version=rule_version("nutrition"))
+            _print_outcome(f"Nutrient {args.nutrient!r}", outcome)
     else:
         # Ambiguous: show candidates like FoodMatch.describe()
         print(f"Ambiguous: {len(match.candidates)} candidates for {args.query!r}")
@@ -198,6 +218,17 @@ def _lookup(args) -> int:
             print(f"  ... and {len(match.candidates) - limit} more")
 
     return 0
+
+
+def _print_outcome(label: str, outcome) -> None:
+    """One Outcome → one printed line; unresolved answers print their reason."""
+    if outcome.resolved:
+        prov = outcome.provenance
+        print(f"{label}: {outcome.value:g} {outcome.unit} "
+              f"([{prov.source}:{prov.source_id}] {prov.method}, "
+              f"{prov.confidence:.0%}, {prov.version}, {prov.license})")
+    else:
+        print(f"{label}: unresolved [{outcome.reason}] {outcome.detail}")
 
 
 if __name__ == "__main__":

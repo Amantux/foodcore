@@ -158,13 +158,30 @@ standard library, so it costs no dependency.
 **The bulk dataset is never committed.** Build it on the host:
 
 ```bash
-python3 -m foodcore.cli build-usda \
+uv run --with . python3 -m foodcore.cli build-usda \
     --fdc-dir ./FoodData_Central_csv \
     --out /config/mymeal/foodcore.sqlite \
     --dataset-version "April 2025" --retrieved 2025-04-01
 
-python3 -m foodcore.cli info --dataset /config/mymeal/foodcore.sqlite
+uv run --with . python3 -m foodcore.cli info --dataset /config/mymeal/foodcore.sqlite
+
+# "does 'cooked rice' resolve, and what does a cup of it weigh?"
+uv run --with . python3 -m foodcore.cli lookup "cooked rice" \
+    --dataset /config/mymeal/foodcore.sqlite --measure cup --nutrient energy
+
+# Or against the bundled minimal dataset, without building anything — the
+# reference records answer from the wheel, so a lookup always works:
+uv run --with . python3 -m foodcore.cli lookup "Flour, wheat, white" \
+    --measure cup --nutrient energy
 ```
+
+`python3 -m foodcore.cli` only resolves once `foodcore` is importable. The
+package directory is `app/`, so a bare `python3 -m ...` run from this
+checkout imports nothing (or the host app's own `app` package); `uv run`
+avoids that by building the wheel from the checkout first. Same caveat
+applies to `uv sync` plus `python3.11 -m ...` — do not install from PyPI or
+an editable checkout of another project and expect this to match the checkout
+you are editing.
 
 `--dataset-version` is required: a snapshot that cannot say which release it is
 cannot be cited, and an uncitable value is one this package will not serve. The
