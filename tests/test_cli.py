@@ -251,3 +251,222 @@ def test_info_on_a_missing_dataset_exits_nonzero(tmp_path, capsys):
 
     assert code == 1
     assert "absent.sqlite" in capsys.readouterr().err
+
+
+# --- lookup -------------------------------------------------------------
+
+
+def test_lookup_resolves_a_confident_food(tmp_path, capsys):
+    export = write_fdc_export(tmp_path / "export")
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    code = main(["lookup", "Flour, wheat, white", "--dataset", str(out)])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    assert "Resolved:" in out_text
+    assert "Flour, wheat, white" in out_text
+    assert "usda:1001" in out_text
+
+
+def test_lookup_shows_candidates_when_ambiguous(tmp_path, capsys):
+    # Create a dataset with multiple rice variants for ambiguous testing
+    export_dir = tmp_path / "export"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    (export_dir / "food.csv").write_text(
+        "fdc_id,data_type,description\n"
+        "1001,foundation_food,\"Rice, white, long-grain, raw\"\n"
+        "1002,foundation_food,\"Rice, white, long-grain, cooked\"\n"
+        "1003,foundation_food,\"Rice, white, medium-grain, raw\"\n"
+        "1004,branded_food,\"Tomatoes, canned\"\n"
+    )
+    (export_dir / "measure_unit.csv").write_text("id,name\n9,cups\n10,undetermined\n")
+    (export_dir / "food_portion.csv").write_text(
+        "id,fdc_id,amount,measure_unit_id,portion_description,modifier,gram_weight\n"
+        "1,1001,1,9,,,185\n"
+        "2,1001,2,9,,,370\n"
+        "3,1002,1,9,,,158\n"
+        "4,1003,1,9,,,175\n"
+    )
+    (export_dir / "nutrient.csv").write_text(
+        "id,name,unit_name\n"
+        "1008,Energy,KCAL\n"
+        "1003,Protein,G\n"
+    )
+    (export_dir / "food_nutrient.csv").write_text(
+        "fdc_id,nutrient_id,amount\n"
+        "1001,1008,365\n"
+        "1001,1003,7.1\n"
+        "1002,1008,130\n"
+        "1002,1003,2.7\n"
+        "1003,1008,365\n"
+        "1003,1003,7.2\n"
+    )
+
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export_dir), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    code = main(["lookup", "Rice", "--dataset", str(out)])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    assert "Ambiguous:" in out_text
+    assert "Rice, white, long-grain, raw" in out_text
+    assert "Rice, white, long-grain, cooked" in out_text
+
+
+def test_lookup_handles_no_match_cleanly(tmp_path, capsys):
+    export = write_fdc_export(tmp_path / "export")
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    code = main(["lookup", "nonsensefood12345", "--dataset", str(out)])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    assert "No matches for" in out_text
+    assert "nonsensefood12345" in out_text
+
+
+def test_lookup_uses_bundled_fallback_when_no_dataset(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("FOODCORE_DATASET", raising=False)
+    # A nonsense query on the minimal dataset should still work (no traceback)
+    code = main(["lookup", "nonsensefood12345"])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    assert "No matches for" in out_text
+
+
+def test_lookup_limit_flag_controls_candidate_count(tmp_path, capsys):
+    # Create a dataset with multiple rice variants
+    export_dir = tmp_path / "export"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    (export_dir / "food.csv").write_text(
+        "fdc_id,data_type,description\n"
+        "1001,foundation_food,\"Rice, white, long-grain, raw\"\n"
+        "1002,foundation_food,\"Rice, white, long-grain, cooked\"\n"
+        "1003,foundation_food,\"Rice, white, medium-grain, raw\"\n"
+        "1004,branded_food,\"Tomatoes, canned\"\n"
+    )
+    (export_dir / "measure_unit.csv").write_text("id,name\n9,cups\n10,undetermined\n")
+    (export_dir / "food_portion.csv").write_text(
+        "id,fdc_id,amount,measure_unit_id,portion_description,modifier,gram_weight\n"
+        "1,1001,1,9,,,185\n"
+        "2,1001,2,9,,,370\n"
+        "3,1002,1,9,,,158\n"
+        "4,1003,1,9,,,175\n"
+    )
+    (export_dir / "nutrient.csv").write_text(
+        "id,name,unit_name\n"
+        "1008,Energy,KCAL\n"
+        "1003,Protein,G\n"
+    )
+    (export_dir / "food_nutrient.csv").write_text(
+        "fdc_id,nutrient_id,amount\n"
+        "1001,1008,365\n"
+        "1001,1003,7.1\n"
+        "1002,1008,130\n"
+        "1002,1003,2.7\n"
+        "1003,1008,365\n"
+        "1003,1003,7.2\n"
+    )
+
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export_dir), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    code = main(["lookup", "Rice", "--dataset", str(out), "--limit", "1"])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    # Should show only one candidate (the limit flag works)
+    assert "1. 1002 Rice, white, long-grain, cooked" in out_text
+    # Should not show the second candidate (the limit is respected)
+    assert "... and 2 more" in out_text
+
+
+# --- lookup --measure / --nutrient: same engines the host apps call -----
+
+def test_lookup_measure_prints_resolved_value_with_provenance(tmp_path, capsys):
+    export = write_fdc_export(tmp_path)
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    code = main(["lookup", "Flour, wheat, white", "--dataset", str(out),
+                 "--measure", "cup"])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    # "cup" row 1 on 1001 is 125 g -> the Outcome prints value + unit and
+    # the source row's provenance (USDA snapshot, license).
+    assert "Measure 'cup': 125 g" in out_text
+    assert "usda:1001" in out_text
+    assert "CC0-1.0" in out_text
+
+
+def test_lookup_measure_when_food_has_no_portions_prints_reason(tmp_path,
+                                                                  capsys):
+    export = write_fdc_export(tmp_path)
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    # 1002's only portion row names the unnameable measure (id 10), which the
+    # importer skips -> `portion_grams` says no_portion_data, not zero grams.
+    code = main(["lookup", "Tomatoes, canned", "--dataset", str(out),
+                 "--measure", "cup"])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    assert "unresolved [no_portion_data]" in out_text
+
+
+def test_lookup_nutrient_prints_resolved_value_and_unknown_reason(tmp_path,
+                                                                    capsys):
+    export = write_fdc_export(tmp_path)
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    main(["lookup", "Flour, wheat, white", "--dataset", str(out),
+          "--nutrient", "energy"])
+    main(["lookup", "Tomatoes, canned", "--dataset", str(out),
+          "--nutrient", "energy"])
+    out_text = capsys.readouterr().out
+    # 1001: energy 364 kcal published; 1002: nutrient row has no amount,
+    # so the record carries no energy -> unknown, never zero.
+    # (The engine normalises the source "KCAL" unit to "kcal"; the
+    # original expectation here ("364 KCAL") was never run and did not
+    # match actual behaviour.)
+    assert "Nutrient 'energy': 364 kcal" in out_text
+    assert "Nutrient 'energy': unresolved [no_nutrient_data]" in out_text
+
+
+def test_lookup_ambiguous_query_shows_candidates_not_a_measure_guess(
+        tmp_path, capsys):
+    # An ambiguous query prints candidates and skips the measure lookup —
+    # there is no single record to ask — and still exits 0 without traceback.
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    (export_dir / "food.csv").write_text(
+        "fdc_id,data_type,description\n"
+        "1001,foundation_food,\"Rice, white, long-grain, cooked\"\n"
+        "1002,foundation_food,\"Rice, white, long-grain, raw\"\n"
+    )
+    (export_dir / "measure_unit.csv").write_text(
+        "id,name\n9,cups\n10,Serving\n")
+    (export_dir / "food_portion.csv").write_text(
+        "id,fdc_id,amount,measure_unit_id,portion_description,modifier,"
+        "gram_weight\n"
+        "1,1001,1,9,,,185\n2,1002,1,9,,,158\n"
+    )
+    out = tmp_path / "fc.sqlite"
+    main(["build-usda", "--fdc-dir", str(export_dir), "--out", str(out),
+          "--dataset-version", "April 2025"])
+
+    code = main(["lookup", "Rice", "--dataset", str(out), "--measure",
+                 "cup"])
+    assert code == 0
+    out_text = capsys.readouterr().out
+    assert "Ambiguous: 2 candidates" in out_text
+    # No Measure/Nutrient line: nothing was resolved, so nothing was looked up.
+    assert "Measure" not in out_text
