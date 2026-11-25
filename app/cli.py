@@ -1,6 +1,6 @@
-"""``python3 -m foodcore.cli`` — build and inspect a reference dataset.
+"""``python3 -m foodcore.cli`` — build and inspect a reference dataset, drive the diary.
 
-Two commands, both run by an operator (or a host app's import job), never in a
+Three command groups, all run by an operator (or a host app's import job), never in a
 request path:
 
     python3 -m foodcore.cli build-usda --fdc-dir ./FoodData_Central_csv \\
@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import sqlite3
 import sys
 
 from .datasets import DatasetError, build_dataset, load_dataset
+from .diary import add_entry, day_totals, delete_entry, import_csv, init_db, list_entries, update_entry
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,10 +51,73 @@ def main(argv: list[str] | None = None) -> int:
                       help="path to the dataset (default: $FOODCORE_DATASET, "
                            "else the bundled minimal one)")
 
+    diary = sub.add_parser(
+        "diary",
+        help="the household food diary: add / list / edit / delete / import",
+    )
+    diary_commands = diary.add_subparsers(dest="diary_command", required=True)
+
+    diary_list = diary_commands.add_parser(
+        "list",
+        help="list entries, newest first, grouped by day, with each day's kcal total",
+    )
+    diary_list.add_argument(
+        "--db",
+        default=None,
+        help="diary store file (default: the diary's own store)",
+    )
+
+    diary_add = diary_commands.add_parser(
+        "add",
+        help="add one eating occasion",
+    )
+    diary_add.add_argument("title", help="what was eaten, e.g. \"Chicken stir-fry\"")
+    diary_add.add_argument("--kind", default="food", choices=("meal", "food"),
+                           help="meal slot or standalone food (default: food)")
+    diary_add.add_argument("--note", default=None, help="free text")
+    diary_add.add_argument("--kcal", type=float, default=None,
+                           help="kcal for the eating occasion; omit when unmeasured")
+    diary_add.add_argument("--tags", default=None, help="comma-separated tags")
+    diary_add.add_argument("--when", default=None,
+                            help="ISO datetime of the meal (default: now)")
+    diary_add.add_argument("--db", default=None, help="diary store file")
+
+    diary_edit = diary_commands.add_parser(
+        "edit",
+        help="update the fields of a diary entry",
+    )
+    diary_edit.add_argument("entry_id", type=int, help="id of the entry to edit")
+    diary_edit.add_argument("--when", default=None, help="ISO datetime of the meal")
+    diary_edit.add_argument("--kind", default=None, choices=("meal", "food"),
+                             help="meal slot or standalone food")
+    diary_edit.add_argument("--title", default=None, help="what was eaten")
+    diary_edit.add_argument("--note", default=None, help="free text")
+    diary_edit.add_argument("--kcal", type=float, default=None, help="kcal")
+    diary_edit.add_argument("--tags", default=None, help="comma-separated tags")
+    diary_edit.add_argument("--db", default=None, help="diary store file")
+
+    diary_delete = diary_commands.add_parser(
+        "delete",
+        help="delete a diary entry",
+    )
+    diary_delete.add_argument("entry_id", type=int, help="id of the entry to delete")
+    diary_delete.add_argument("--db", default=None, help="diary store file")
+
+    diary_import = diary_commands.add_parser(
+        "import",
+        help="import a diary CSV (when,title,kcal)",
+    )
+    diary_import.add_argument("path", help="path to the diary CSV to import")
+    diary_import.add_argument("--db", default=None, help="diary store file")
+
     args = parser.parse_args(argv)
     if args.command == "build-usda":
         return _build_usda(args)
-    return _info(args)
+    if args.command == "info":
+        return _info(args)
+    if args.command == "diary":
+        return _diary(args)
+    return 2
 
 
 def _build_usda(args) -> int:
@@ -125,6 +190,107 @@ def _info(args) -> int:
             f"{record.record_count} records)"
         )
     return 0
+
+
+def _diary(args) -> int:
+    if args.diary_command == "list":
+        return _diary_list(args)
+    if args.diary_command == "add":
+        return _diary_add(args)
+    if args.diary_command == "edit":
+        return _diary_edit(args)
+    if args.diary_command == "delete":
+        return _diary_delete(args)
+    return _diary_import(args)
+
+
+def _diary_list(args) -> int:
+    init_db(db=args.db)
+    entries = list_entries(db=args.db)
+    totals = day_totals(db=args.db)
+    days: dict[str, list[dict]] = {}
+    for entry in entries:
+        days.setdefault(str(entry["when"])[:10], []).append(entry)
+    for day, group in days.items():
+        print(day)
+        for entry in group:
+            moment = str(entry["when"])
+            clock = moment[11:16] if len(moment) > 16 else moment
+            line = f"  {clock}  {entry['title']}"
+            if entry["kcal"] is not None:
+                line += f" ({_fmt_kcal(entry['kcal'])} kcal)"
+            print(line)
+        print(f"  total: {_fmt_kcal(totals.get(day, 0.0))}")
+    return 0
+
+
+def _diary_add(args) -> int:
+    try:
+        init_db(db=args.db)
+        entry_id = add_entry(
+            when=args.when or datetime.datetime.now().isoformat(timespec="seconds"),
+            title=args.title,
+            kind=args.kind,
+            note=args.note,
+            kcal=args.kcal,
+            tags=args.tags,
+            source="manual",
+            db=args.db,
+        )
+    except (ValueError, sqlite3.Error) as exc:
+        print(f"foodcore: {exc}", file=sys.stderr)
+        return 1
+    print(f"added entry {entry_id}")
+    return 0
+
+
+def _diary_edit(args) -> int:
+    fields = {}
+    for key in ("when", "kind", "title", "note", "kcal", "tags"):
+        value = getattr(args, key, None)
+        if value is not None:
+            fields[key] = value
+    try:
+        init_db(db=args.db)
+        updated = update_entry(args.entry_id, fields, db=args.db)
+    except (ValueError, sqlite3.Error) as exc:
+        print(f"foodcore: {exc}", file=sys.stderr)
+        return 1
+    if updated is None:
+        print(f"no entry {args.entry_id}", file=sys.stderr)
+        return 1
+    print(f"updated entry {args.entry_id}")
+    return 0
+
+
+def _diary_delete(args) -> int:
+    try:
+        init_db(db=args.db)
+        deleted = delete_entry(args.entry_id, db=args.db)
+    except (ValueError, sqlite3.Error) as exc:
+        print(f"foodcore: {exc}", file=sys.stderr)
+        return 1
+    if deleted:
+        print(f"deleted entry {args.entry_id}")
+        return 0
+    print(f"no entry {args.entry_id}", file=sys.stderr)
+    return 1
+
+
+def _diary_import(args) -> int:
+    try:
+        init_db(db=args.db)
+        count = import_csv(args.path, db=args.db)
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        print(f"foodcore: {exc}", file=sys.stderr)
+        return 1
+    print(f"imported {count} entries from {args.path}")
+    return 0
+
+
+def _fmt_kcal(value: float) -> str:
+    """Render a kcal figure without a trailing ``.0`` on whole numbers."""
+    return f"{float(value):g}"
 
 
 if __name__ == "__main__":
