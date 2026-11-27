@@ -272,6 +272,12 @@ there are no imports reaching into a host app, no absolute paths outside the
 package, and all intra-package imports are relative. `tests/test_package.py`
 enforces that structurally, including for modules added later.
 
+## Documentation
+
+- [Accessibility acceptance checklist — quick actions](docs/a11y-quick-actions.md):
+  the single source of truth for the one-tap **edit / undo / re-log** quick actions
+  (the ideas 9 / 16 flows). Implementation PRs for those flows must satisfy it.
+
 ## Development
 
 ```bash
