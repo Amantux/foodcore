@@ -41,6 +41,7 @@ packages = [
     "foodcore.sources",
     "foodcore.data",
     "foodcore.rules",
+    "foodcore.diary",
 ]
 
 [tool.setuptools.package-data]
