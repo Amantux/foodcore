@@ -1,14 +1,17 @@
-"""The build/inspect CLI, driven the way an operator drives it.
+"""The CLI, driven the way an operator drives it: build/inspect a dataset, then run the diary.
 
 The USDA fixtures below are shaped like a FoodData Central CSV export but hold
 invented ids and weights — they exercise the importer's structure, not USDA's
 numbers, and nothing from them is ever shipped. (The REAL rows live in
 `tests/fixtures/usda_fdc_sample` and are asserted in `test_usda.py`.)
 """
+import os
+
 import pytest
 
 from foodcore import load_dataset, rule_version
 from foodcore.cli import main
+from foodcore.diary import db as diary_store
 from foodcore.sources.usda import UsdaImportError, load_fdc_csv
 
 VERSION = rule_version("convert")
@@ -251,3 +254,73 @@ def test_info_on_a_missing_dataset_exits_nonzero(tmp_path, capsys):
 
     assert code == 1
     assert "absent.sqlite" in capsys.readouterr().err
+
+
+# --- the diary CLI --------------------------------------------------------
+
+DIARY_FIXTURE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "fixtures", "sample.csv"
+)
+
+
+def diary_db(tmp_path) -> str:
+    """A throwaway diary store file, so the CLI is driven like an operator."""
+    return str(tmp_path / "diary.db")
+
+
+def test_diary_list_groups_by_day_and_sums_the_kcal_total(tmp_path, capsys):
+    db = diary_db(tmp_path)
+    assert main(["diary", "add", "Breakfast", "--kcal", "300", "--when", "2026-11-25T08:30:00", "--db", db]) == 0
+    assert main(["diary", "add", "Dinner", "--kcal", "600", "--when", "2026-11-25T19:00:00", "--db", db]) == 0
+
+    capsys.readouterr()  # the add commands reported their entry ids
+    assert main(["diary", "list", "--db", db]) == 0
+    out = capsys.readouterr().out
+    # Grouped under the day, entries newest-first within it, one total per day.
+    assert out.splitlines()[0] == "2026-11-25"
+    assert "Breakfast" in out
+    assert "Dinner" in out
+    assert "total: 900" in out
+
+
+def test_diary_list_is_newest_first_and_groups_by_day(tmp_path, capsys):
+    db = diary_db(tmp_path)
+    main(["diary", "add", "Lunch", "--kcal", "500", "--when", "2026-11-24T12:00:00", "--db", db])
+    main(["diary", "add", "Dinner", "--kcal", "700", "--when", "2026-11-25T19:00:00", "--db", db])
+
+    assert main(["diary", "list", "--db", db]) == 0
+    out = capsys.readouterr().out
+    assert out.index("2026-11-25") < out.index("2026-11-24")
+    assert out.index("Dinner") < out.index("Lunch")
+
+
+def test_diary_add_edit_delete_cycle_on_a_temp_db(tmp_path, capsys):
+    db = diary_db(tmp_path)
+    assert main(["diary", "add", "Dinner", "--kcal", "600", "--db", db]) == 0
+
+    entry = diary_store.get_entry(1, db=db)
+    assert entry is not None
+    assert entry["kind"] == "food"
+    assert entry["when"]
+
+    assert main(["diary", "edit", "1", "--kcal", "650", "--db", db]) == 0
+    assert diary_store.get_entry(1, db=db)["kcal"] == 650.0
+
+    assert main(["diary", "list", "--db", db]) == 0
+    assert "650" in capsys.readouterr().out
+
+    assert main(["diary", "delete", "1", "--db", db]) == 0
+    capsys.readouterr()  # the delete reported on stdout
+    assert main(["diary", "list", "--db", db]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_diary_import_then_list_uses_the_committed_fixture(tmp_path, capsys):
+    db = diary_db(tmp_path)
+    assert main(["diary", "import", DIARY_FIXTURE, "--db", db]) == 0
+    assert main(["diary", "list", "--db", db]) == 0
+    out = capsys.readouterr().out
+    # Newest day first, and the all-NULL kcal day computes a total of 0.
+    assert "2026-11-27" in out
+    assert "Herbal tea" in out
+    assert "total: 0" in out
