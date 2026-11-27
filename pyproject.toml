@@ -40,6 +40,7 @@ packages = [
     "foodcore",
     "foodcore.sources",
     "foodcore.data",
+    "foodcore.diary",
     "foodcore.rules",
 ]
 
